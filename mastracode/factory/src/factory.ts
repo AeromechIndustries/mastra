@@ -1400,7 +1400,6 @@ export class MastraFactory {
       session =>
         hydrateSupervisorSession(session, {
           projects: factoryProjectsStorage,
-          memorySettings: memorySettingsStorage,
         }).catch(error => {
           console.warn('[Factory Supervisor] Failed to hydrate supervisor session', {
             error: error instanceof Error ? error.message : String(error),
