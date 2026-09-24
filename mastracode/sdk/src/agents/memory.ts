@@ -45,7 +45,10 @@ function resolveRouteMemoryModels(
     const occurrence = (appearances.get(entry.id) ?? 0) + 1;
     appearances.set(entry.id, occurrence);
     try {
-      entries.push({ id: `${entry.id}:memory${occurrence === 1 ? '' : `#${occurrence}`}`, model: resolve(entry.memoryModelId) });
+      entries.push({
+        id: `${entry.id}:memory${occurrence === 1 ? '' : `#${occurrence}`}`,
+        model: resolve(entry.memoryModelId),
+      });
     } catch {
       break;
     }
@@ -121,7 +124,10 @@ function resolveOmRoleModelForRequest(
     return 'auto' as const;
   };
 
-  if (isFactoryMemorySettingsUnavailable(factorySettingsContext) || (factorySettingsContext === undefined && isFactory)) {
+  if (
+    isFactoryMemorySettingsUnavailable(factorySettingsContext) ||
+    (factorySettingsContext === undefined && isFactory)
+  ) {
     return useAuto();
   }
   if (factorySettingsContext !== undefined) {
