@@ -89,6 +89,11 @@ export {
 } from './processors/observational-memory';
 export { WorkingMemoryExtractor } from './processors/observational-memory/working-memory-extractor';
 export {
+  AUTO_MODEL_BY_PROVIDER,
+  resolveAutoModelId,
+  type ResolveAutoModelIdOptions,
+} from './processors/observational-memory/auto-model';
+export {
   KnowledgeSemanticIndexCoordinator,
   StaleKnowledgeSemanticIndexError,
   Subconscious,
@@ -126,6 +131,8 @@ type MemoryObservationalMemoryOptions = Omit<ObservationalMemoryOptions, 'model'
   temporalMarkers?: boolean;
   onDebugEvent?: ObservationalMemoryConfig['onDebugEvent'];
   hooks?: ObservationalMemoryConfig['hooks'];
+  autoModels?: ObservationalMemoryConfig['autoModels'];
+  resolveModel?: ObservationalMemoryConfig['resolveModel'];
 };
 
 type MemoryOptions = Omit<MemoryConfigInternal, 'observationalMemory'> & {
@@ -2309,6 +2316,8 @@ ${workingMemory}`;
       activateOnProviderChange: omConfig.activateOnProviderChange,
       shareTokenBudget: omConfig.shareTokenBudget,
       model: omConfig.model,
+      autoModels: omConfig.autoModels,
+      resolveModel: omConfig.resolveModel,
       mastra: this._mastraInstance,
       onIndexObservations,
       onDebugEvent: omConfig.onDebugEvent,
