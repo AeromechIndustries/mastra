@@ -59,7 +59,7 @@ When the thread has a running agent stream, `sendMessage()` becomes new input in
 
 ### Input during reasoning
 
-In the default agent loop, accepted pending messages and signals interrupt a model request that has produced only reasoning or metadata. This includes the wait for its first token. Mastra cancels that request, discards its response from model history and memory, and includes queued input in the next request within the same run. Earlier completed responses stay in history.
+In the default loop and experimental durable and evented agents, accepted pending messages and signals interrupt a model request that has produced only reasoning or metadata. This includes the wait for its first token. Mastra cancels that request, discards its response from model history and memory, and includes queued input in the next request within the same run. Earlier completed responses stay in history.
 
 At the start of each step, Mastra batches pending input before per-step input processors (`processInputStep`) run. Messages and signals already queued when the first step starts join its first model request instead of receiving a separate response.
 
@@ -69,7 +69,7 @@ Interrupted requests don't count toward `maxSteps` or advance `stepNumber`. The 
 
 Already-streamed reasoning may remain visible until the client reloads history. Cancelling a model request also doesn't force a custom processor to stop: the next request waits for in-flight processing to settle. Mastra discards framework-owned response buffers and clears reasoning held by the built-in `BatchPartsProcessor`, but doesn't undo other processor state, data that processors write while the cancelled request settles, or external side effects. Usage totals exclude interrupted requests, including any usage the provider reports for them. Providers may still bill for those requests.
 
-This reasoning interruption applies to the default loop, not the experimental durable or evented agents or the Inngest engine.
+Reasoning interruption doesn't apply to the Inngest engine.
 
 ## Message input
 
