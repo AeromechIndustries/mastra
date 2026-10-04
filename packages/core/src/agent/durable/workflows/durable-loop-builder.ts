@@ -311,6 +311,7 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
       outputSchema: z.any(),
       execute: async stepParams => {
         const execOutput = stepParams.inputData as Record<string, any>;
+        if (execOutput.stepResult?.signalPreempted && !execOutput.stepResult.isContinued) return execOutput;
         const rt = this.resolveRuntime(stepParams);
         try {
           let drainList: ReturnType<typeof createRunMessageList> | undefined;
@@ -453,6 +454,7 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
               messageId: state.messageId,
               requestContextEntries: state.requestContextEntries,
               stepIndex: state.iterationCount,
+              signalPreempted: state.lastStepResult?.signalPreempted,
               // Processor hooks receive the running step list (#24293) — the
               // llm-execution step reads this for stepNumber/steps parity with
               // the main loop.
@@ -639,6 +641,8 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
           // messageListState if it throws.
         }
       }
+
+      if (state.lastStepResult?.signalPreempted) return state.lastStepResult.isContinued === true;
 
       const runMaxSteps = rt.maxSteps;
 

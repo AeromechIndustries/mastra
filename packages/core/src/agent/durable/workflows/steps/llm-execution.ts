@@ -37,7 +37,6 @@ import { ProcessorRunner } from '../../../../processors/runner';
 import { needsTrailingAssistantGuard } from '../../../../processors/trailing-assistant-guard';
 import { getToolDefinitionsForTracing } from '../../../../stream/aisdk/v5/compat/prepare-tools';
 import { execute } from '../../../../stream/aisdk/v5/execute';
-import { DefaultStepResult } from '../../../../stream/aisdk/v5/output-helpers';
 import { MastraModelOutput, persistProcessorDataChunk } from '../../../../stream/base/output';
 import type { ChunkType, TextDeltaPayload, ToolCallPayload } from '../../../../stream/types';
 import { ChunkFrom } from '../../../../stream/types';
@@ -139,6 +138,7 @@ const durableLLMInputSchema = z.object({
   modelSpanData: z.any().optional(),
   // Step index for continuation (step: 0, 1, 2, ...)
   stepIndex: z.number().optional(),
+  signalPreempted: z.boolean().optional(),
   // Step results from previous iterations, passed to processor hooks as `steps`
   accumulatedSteps: z.array(z.any()).optional(),
 });
@@ -173,6 +173,7 @@ const durableLLMOutputSchema = z.object({
     reason: z.string(),
     warnings: z.array(z.any()),
     isContinued: z.boolean(),
+    signalPreempted: z.boolean().optional(),
     totalUsage: z.any().optional(),
     tripwire: z.any().optional(),
   }),
@@ -279,30 +280,13 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
       const emitFatalErrorBail = async (
         fatalError: Error,
         modelId: string,
-        discardedAttempt?: ModelAttempt,
+        signalPreempted = false,
       ): Promise<DurableLLMStepOutput> => {
-        const usage = discardedAttempt?.usage ?? {
+        const usage = {
           inputTokens: undefined,
           outputTokens: undefined,
           totalTokens: undefined,
         };
-        const discardedStep = discardedAttempt
-          ? new DefaultStepResult({
-              content: [],
-              warnings: discardedAttempt.warnings,
-              finishReason: 'error',
-              providerMetadata: undefined,
-              usage,
-              request: discardedAttempt.request ?? {},
-              response: {
-                id: discardedAttempt.messageId ?? inputData.messageId,
-                timestamp: new Date(),
-                modelId,
-                messages: [],
-              },
-            })
-          : undefined;
-        if (discardedStep && discardedAttempt) bindModelAttempt(discardedStep, discardedAttempt);
         // End the root spans here too — this is the only error path that covers EventedAgent,
         // whose fire-and-forget launch never sees the failure (so emitError never runs).
         endRunSpansWithError(runId, fatalError);
@@ -320,24 +304,19 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
             payload: { error: serializeError(fatalError) },
           });
 
-          // Emit step-finish so MastraModelOutput resolves finishReason to 'error'
-          await emitChunkEvent(pubsub, runId, {
-            type: 'step-finish',
-            runId,
-            from: ChunkFrom.AGENT,
-            payload: {
-              stepResult: {
-                reason: 'error',
-                isContinued: false,
+          if (!signalPreempted) {
+            // Emit step-finish so MastraModelOutput resolves finishReason to 'error'.
+            await emitChunkEvent(pubsub, runId, {
+              type: 'step-finish',
+              runId,
+              from: ChunkFrom.AGENT,
+              payload: {
+                stepResult: { reason: 'error', isContinued: false },
+                output: { usage },
+                metadata: {},
               },
-              output: {
-                usage,
-                ...(discardedStep ? { steps: [discardedStep] } : {}),
-              },
-              metadata: {},
-              ...(discardedStep ? { _durableStepContent: [] } : {}),
-            },
-          });
+            });
+          }
         }
 
         return {
@@ -345,10 +324,10 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
           text: '',
           toolCalls: [],
           stepResult: {
-            reason: 'error' as any,
-            warnings: discardedAttempt?.warnings ?? [],
+            reason: 'error',
+            warnings: [],
             isContinued: false,
-            ...(discardedAttempt ? { totalUsage: usage } : {}),
+            ...(signalPreempted ? { signalPreempted: true } : {}),
           },
           metadata: { modelId },
           state: typedInput.state,
@@ -369,16 +348,21 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
         // abort (#21724).
         const earlyTimeout = resolveTotalTimeoutAbort(executionAbortSignalEarly);
         if (earlyTimeout) {
-          return emitFatalErrorBail(earlyTimeout, typedInput.modelConfig?.modelId ?? 'unknown');
+          return emitFatalErrorBail(
+            earlyTimeout,
+            typedInput.modelConfig?.modelId ?? 'unknown',
+            inputData.signalPreempted === true,
+          );
         }
         return {
           messageListState: messageList.serialize(),
           text: '',
           toolCalls: [],
           stepResult: {
-            reason: 'abort' as any,
+            reason: 'abort',
             warnings: [],
             isContinued: false,
+            ...(inputData.signalPreempted ? { signalPreempted: true } : {}),
           },
           metadata: {},
           state: typedInput.state,
@@ -486,7 +470,6 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
         attemptRegistry.modelAttempts ??= new Map();
         attemptRegistry.modelAttempts.set(modelAttempt.id, modelAttempt);
       }
-      let attemptStepStartEmitted = false;
       const discardModelAttempt = async (error: unknown, modelId: string): Promise<DurableLLMStepOutput> => {
         await modelAttempt.discardOutput();
         const reasoningEnds: ChunkType[] = [];
@@ -498,73 +481,18 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
           executionAbortSignalEarly,
           error instanceof Error ? error : undefined,
         );
-        if (totalTimeout) return emitFatalErrorBail(totalTimeout, modelId, modelAttempt);
-        const isAborted = executionAbortSignalEarly?.aborted === true;
-        const discardedStep = new DefaultStepResult({
-          content: [],
-          warnings: modelAttempt.warnings,
-          finishReason: 'other',
-          providerMetadata: undefined,
-          usage: modelAttempt.usage,
-          request: modelAttempt.request ?? {},
-          response: {
-            id: currentMessageId,
-            timestamp: new Date(),
-            modelId: modelAttempt.modelId ?? modelId,
-            messages: [],
-          },
-        });
-        bindModelAttempt(discardedStep, modelAttempt);
-        const stepResult = {
-          reason: 'other' as const,
-          warnings: modelAttempt.warnings,
-          totalUsage: modelAttempt.usage,
-          isContinued: !isAborted,
-        };
-        const metadata = {
-          modelId: modelAttempt.modelId ?? modelId,
-          request: modelAttempt.request
-            ? {
-                body:
-                  typeof modelAttempt.request.body === 'string'
-                    ? modelAttempt.request.body
-                    : JSON.stringify(modelAttempt.request.body),
-              }
-            : undefined,
-        };
-        if (pubsub) {
-          if (!attemptStepStartEmitted) {
-            await emitStepStartEvent(pubsub, runId, {
-              stepId: DurableStepIds.LLM_EXECUTION,
-              messageId: currentMessageId,
-              warnings: modelAttempt.warnings,
-            });
-          }
-          const finishChunk: ChunkType = {
-            type: 'step-finish',
-            runId,
-            from: ChunkFrom.AGENT,
-            payload: {
-              messageId: currentMessageId,
-              stepResult,
-              output: { text: '', toolCalls: [], usage: modelAttempt.usage, steps: [discardedStep] },
-              metadata,
-              messages: {
-                all: messageList.get.all.aiV5.model(),
-                user: messageList.get.input.aiV5.model(),
-                nonUser: [],
-              },
-              _durableStepContent: [],
-            },
-          };
-          await emitChunkEvent(pubsub, runId, finishChunk);
-        }
+        if (totalTimeout) return emitFatalErrorBail(totalTimeout, modelId, true);
         return {
           messageListState: messageList.serialize(),
           text: '',
           toolCalls: [],
-          stepResult,
-          metadata,
+          stepResult: {
+            reason: 'other',
+            warnings: modelAttempt.warnings,
+            isContinued: executionAbortSignalEarly?.aborted !== true,
+            signalPreempted: true,
+          },
+          metadata: { modelId: modelAttempt.modelId ?? modelId },
           state: typedInput.state,
         };
       };
@@ -1545,7 +1473,6 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
                 // preserves the canonical payload shape with an empty `request` object.
                 if (!stepStartEmitted && pubsub) {
                   stepStartEmitted = true;
-                  attemptStepStartEmitted = true;
                   const startData = {
                     stepId: DurableStepIds.LLM_EXECUTION,
                     messageId: currentMessageId,

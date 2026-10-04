@@ -2,6 +2,7 @@ import type { LanguageModelV2StreamPart } from '@ai-sdk/provider-v5';
 import { MockLanguageModelV2, convertArrayToReadableStream } from '@internal/ai-sdk-v5/test';
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { createScorer } from '../../../evals';
 import { EventEmitterPubSub } from '../../../events/event-emitter';
 import { Mastra } from '../../../mastra';
 import { MockMemory } from '../../../memory/mock';
@@ -174,7 +175,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
       const stream = await agent.stream('initial question', {
         memory: { thread: scope.threadId, resource: scope.resourceId },
-        maxSteps: 4,
+        maxSteps: 1,
         abortSignal: runController.signal,
         onFinish,
         onAbort,
@@ -209,12 +210,12 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         expect(signals[1]?.aborted).toBe(false);
         expect(runController.signal.aborted).toBe(false);
         expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
-        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(2);
+        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
         expect(chunks.some(chunk => chunk.type === 'abort' || chunk.type === 'error')).toBe(false);
         expect(onFinish).toHaveBeenCalledTimes(1);
         expect(onAbort).not.toHaveBeenCalled();
         expect(onError).not.toHaveBeenCalled();
-        expect(onStepFinish).toHaveBeenCalledTimes(2);
+        expect(onStepFinish).toHaveBeenCalledTimes(1);
         expect(await stream.output.text).toBe('replacement answer');
         await vi.waitFor(async () =>
           expect((await memory.recall(scope)).messages.some(message => message.role === 'assistant')).toBe(true),
@@ -307,7 +308,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       await entry.workflowExecution;
       expect(chunks.some(chunk => chunk.type.startsWith('reasoning-'))).toBe(false);
       expect(JSON.stringify(chunks)).not.toContain('DELAYED_SIGNATURE');
-      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(2);
+      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
       expect(chunks.filter(chunk => chunk.type === 'data-user-message')).toHaveLength(1);
       expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
       expect(onFinish).toHaveBeenCalledTimes(1);
@@ -386,8 +387,9 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       expect(prompts).toHaveLength(2);
       expect(onFinish).toHaveBeenCalledTimes(1);
       // emitOnNonText:false also buffers lifecycle chunks; check producer accounting.
-      expect(stepContents).toHaveLength(2);
-      expect(stepContents[0]).toEqual([]);
+      expect(stepContents).toHaveLength(1);
+      expect(JSON.stringify(stepContents[0])).toContain('replacement answer');
+      expect(JSON.stringify(stepContents)).not.toContain('BATCH_DISCARDED');
       expect(onStepFinish).not.toHaveBeenCalled();
       expect(state.retained).toBe('ACCEPTED_PROCESSOR_STATE');
       expect(JSON.stringify(state.batch)).not.toContain('BATCH_DISCARDED');
@@ -572,15 +574,15 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       await entry.workflowExecution;
       expect(prompts).toHaveLength(4);
       expect(toolCalls).toBe(2);
-      expect(snapshots.map(snapshot => snapshot.ordinal)).toEqual([0, 1, 2, 3]);
+      expect(snapshots.map(snapshot => snapshot.ordinal)).toEqual([0, 1, 1, 2]);
+      expect(snapshots[2]?.contents).toHaveLength(1);
       expect(snapshots[2]?.contents[0]).toContain('TOOL_COMPLETED_1');
-      expect(snapshots[2]?.contents[1]).toBe(JSON.stringify({ text: '', toolCalls: [], toolResults: [] }));
+      expect(snapshots[3]?.contents).toHaveLength(2);
       expect(snapshots[3]?.contents[0]).toContain('TOOL_COMPLETED_1');
-      expect(snapshots[3]?.contents[2]).toContain('TOOL_COMPLETED_2');
-      expect(onStepFinish).toHaveBeenCalledTimes(4);
-      expect(onStepFinish.mock.calls[1]?.[0].content).toEqual([]);
-      expect(onStepFinish.mock.calls[2]?.[0].text).toBe('ACCEPTED_3');
-      expect(onStepFinish.mock.calls[3]?.[0].text).toBe('replacement answer');
+      expect(snapshots[3]?.contents[1]).toContain('TOOL_COMPLETED_2');
+      expect(onStepFinish).toHaveBeenCalledTimes(3);
+      expect(onStepFinish.mock.calls[1]?.[0].text).toBe('ACCEPTED_3');
+      expect(onStepFinish.mock.calls[2]?.[0].text).toBe('replacement answer');
       expect(JSON.stringify(prompts[2])).not.toContain('ORDINAL_DISCARDED');
       expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('ORDINAL_DISCARDED');
       expect(onAbort).not.toHaveBeenCalled();
@@ -674,7 +676,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         }
         expect(chunks.some(chunk => ['data-late', 'tripwire', 'error', 'abort'].includes(chunk.type))).toBe(false);
         expect(await stream.output.text).toBe('replacement answer');
-        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(2);
+        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
         expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
       } finally {
         held.release();
@@ -742,7 +744,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       expect(prompts).toHaveLength(1);
       expect(JSON.stringify(prompts[0])).toContain('QUEUED_INPUT');
       expect(JSON.stringify(prompts[0])).toContain('PROCESSOR_HISTORY');
-      expect(ordinals).toEqual([0, 1]);
+      expect(ordinals).toEqual([0, 0]);
       expect(stateCounts).toEqual([1, 2]);
       expect(chunks.some(chunk => chunk.type === 'data-late-input')).toBe(false);
       const echoes = chunks.filter(chunk => chunk.type === 'data-signal');
@@ -750,7 +752,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const history = JSON.stringify((await memory.recall({ ...scope, hideSignals: false })).messages);
       expect(history).toContain('PROCESSOR_HISTORY');
       expect(history).not.toContain('STALE_INPUT_WRITER');
-      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(2);
+      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
     } finally {
       held.release();
       stream.abort();
@@ -761,9 +763,14 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     }
   });
 
-  it('charges repeated interruptions to maxSteps and saves the last unanswered signal', async () => {
+  it('retries one logical step beyond processor retry limits with no interruption cap or usage charge', async () => {
     const prompts: unknown[] = [];
     const providerSignals: AbortSignal[] = [];
+    const requestOrdinals: number[] = [];
+    const requestRetryCounts: number[] = [];
+    const requestStepCounts: number[] = [];
+    const onStepFinish = vi.fn();
+    const onIterationComplete = vi.fn();
     const memory = new MockMemory();
     const onFinish = vi.fn();
     const onError = vi.fn();
@@ -773,11 +780,23 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       name: 'Budget',
       instructions: 'Test',
       memory,
+      inputProcessors: [
+        {
+          id: 'logical-accounting',
+          processLLMRequest({ prompt, stepNumber, retryCount, steps }) {
+            requestOrdinals.push(stepNumber);
+            requestRetryCounts.push(retryCount);
+            requestStepCounts.push(steps.length);
+            return { prompt };
+          },
+        },
+      ],
       model: new MockLanguageModelV2({
         doStream: async ({ prompt, abortSignal }) => {
           prompts.push(prompt);
           if (!abortSignal) throw new Error('Expected abort signal');
           providerSignals.push(abortSignal);
+          if (prompts.length === 6) return { warnings: [], stream: convertArrayToReadableStream(answer()) };
           await new Promise((_, reject) =>
             abortSignal.addEventListener('abort', () => reject(abortSignal.reason), { once: true }),
           );
@@ -788,16 +807,18 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
     const stream = await agent.stream('initial question', {
       memory: { thread: scope.threadId, resource: scope.resourceId },
-      maxSteps: 2,
+      maxSteps: 1,
       onFinish,
       onError,
       onAbort,
+      onStepFinish,
+      onIterationComplete,
     });
     const entry = globalRunRegistry.get(stream.runId)!;
     const chunks: ChunkType[] = [];
     const consumption = collect(stream.fullStream, chunks);
     try {
-      for (let index = 0; index < 2; index++) {
+      for (let index = 0; index < 5; index++) {
         await vi.waitFor(() => expect(prompts).toHaveLength(index + 1));
         await (
           await agent.sendSignal({ type: 'user', contents: `BUDGET_SIGNAL_${index}` }, scope)
@@ -806,10 +827,16 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       }
       await consumption;
       await entry.workflowExecution;
-      expect(prompts).toHaveLength(2);
-      expect(JSON.stringify(prompts[1])).toContain('BUDGET_SIGNAL_0');
-      expect(JSON.stringify(prompts)).not.toContain('BUDGET_SIGNAL_1');
-      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(2);
+      expect(prompts).toHaveLength(6);
+      for (let index = 0; index < 5; index++)
+        expect(JSON.stringify(prompts[index + 1])).toContain(`BUDGET_SIGNAL_${index}`);
+      expect(requestOrdinals).toEqual([0, 0, 0, 0, 0, 0]);
+      expect(requestRetryCounts).toEqual(requestOrdinals);
+      expect(requestStepCounts).toEqual(requestOrdinals);
+      expect(onStepFinish).toHaveBeenCalledTimes(1);
+      expect(onIterationComplete).toHaveBeenCalledTimes(1);
+      expect(onIterationComplete.mock.calls[0]?.[0]).toMatchObject({ iteration: 1, text: 'replacement answer' });
+      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
       expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
       expect(onFinish).toHaveBeenCalledTimes(1);
       expect(onError).not.toHaveBeenCalled();
@@ -817,14 +844,12 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const history = JSON.stringify((await memory.recall(scope)).messages);
       expect(history).toContain('BUDGET_SIGNAL_0');
       expect(history).toContain('BUDGET_SIGNAL_1');
-      expect((await memory.recall(scope)).messages.filter(message => message.role === 'assistant')).toHaveLength(0);
+      expect(history).toContain('BUDGET_SIGNAL_4');
+      expect((await memory.recall(scope)).messages.filter(message => message.role === 'assistant')).toHaveLength(1);
       const steps = await stream.output.steps;
-      expect(steps).toHaveLength(2);
-      for (const step of steps) {
-        expect(step.content).toEqual([]);
-        expect(step.usage.inputTokens).toBeUndefined();
-      }
-      expect((await stream.output.totalUsage).inputTokens).toBeUndefined();
+      expect(steps).toHaveLength(1);
+      expect(steps[0]?.text).toBe('replacement answer');
+      expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
       stream.cleanup();
       expect(entry.modelAttempts?.size).toBe(0);
     } finally {
@@ -908,37 +933,39 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     }
   });
 
-  it.each([
-    {
-      label: 'caller abort / unknown',
-      cancellation: 'caller',
-      usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
-    },
-    {
-      label: 'total timeout / unknown',
-      cancellation: 'timeout',
-      usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
-    },
-    {
-      label: 'total timeout / measured zero',
-      cancellation: 'timeout',
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    },
-    {
-      label: 'total timeout / reported',
-      cancellation: 'timeout',
-      usage: {
-        inputTokens: 7,
-        outputTokens: 4,
-        totalTokens: 11,
-        reasoningTokens: 2,
-        cachedInputTokens: 3,
-        cacheCreationInputTokens: 1,
+  it.each(
+    [
+      {
+        label: 'caller abort / unknown',
+        cancellation: 'caller',
+        usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
       },
-    },
-  ])(
-    'keeps discarded output empty when $label wins while a processor settles',
-    async ({ cancellation, usage }) => {
+      {
+        label: 'total timeout / unknown',
+        cancellation: 'timeout',
+        usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
+      },
+      {
+        label: 'total timeout / measured zero',
+        cancellation: 'timeout',
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      },
+      {
+        label: 'total timeout / reported',
+        cancellation: 'timeout',
+        usage: {
+          inputTokens: 7,
+          outputTokens: 4,
+          totalTokens: 11,
+          reasoningTokens: 2,
+          cachedInputTokens: 3,
+          cacheCreationInputTokens: 1,
+        },
+      },
+    ].flatMap(test => [false, true].map(priorAccepted => ({ ...test, priorAccepted }))),
+  )(
+    'keeps discarded output empty with prior accepted=$priorAccepted when $label wins while a processor settles',
+    async ({ cancellation, usage, priorAccepted }) => {
       const held = barrier();
       let processing = false;
       let toolCalls = 0;
@@ -948,9 +975,12 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const onAbort = vi.fn();
       const onError = vi.fn();
       const onStepFinish = vi.fn();
+      const goalScorer = createScorer({ id: 'cancellation-goal', name: 'Cancellation Goal' }).generateScore(() => 1);
+      const judge = vi.spyOn(goalScorer, 'run');
       const { agent, customPubsub } = createOwner(engine, {
         id: crypto.randomUUID(),
         name: 'Cancellation race',
+        goal: { judge: 'mock-judge', scorer: goalScorer, maxRuns: 5 },
         instructions: 'Test',
         memory,
         tools: {
@@ -965,7 +995,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         model: new MockLanguageModelV2({
           doStream: async ({ prompt, abortSignal }) => {
             prompts.push(prompt);
-            if (prompts.length === 1)
+            if (priorAccepted && prompts.length === 1)
               return {
                 warnings: [],
                 stream: convertArrayToReadableStream([
@@ -1011,6 +1041,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       });
       const controller = new AbortController();
       const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
+      await agent.setObjective('Keep the objective active without judging cancelled work', scope);
       const stream = await agent.stream('initial question', {
         memory: { thread: scope.threadId, resource: scope.resourceId },
         maxSteps: 4,
@@ -1038,24 +1069,31 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         ]);
         if (cancellation === 'caller') controller.abort();
         await vi.waitFor(() => expect(entry.abortSignal?.aborted).toBe(true), { timeout: 2_500 });
-        expect(prompts).toHaveLength(2);
+        expect(prompts).toHaveLength(priorAccepted ? 2 : 1);
         held.release();
         await consumption;
         await entry.workflowExecution;
-        expect(prompts).toHaveLength(2);
-        expect(toolCalls).toBe(1);
-        expect(onStepFinish).toHaveBeenCalledTimes(2);
-        const discardedStep = onStepFinish.mock.calls[1]?.[0];
-        expect(discardedStep.content).toEqual([]);
-        expect(discardedStep.reasoningText).toBe('');
-        expect(discardedStep.reasoning).toEqual([]);
-        for (const [key, value] of Object.entries(usage)) expect(discardedStep.usage[key]).toBe(value);
+        expect(prompts).toHaveLength(priorAccepted ? 2 : 1);
+        expect(toolCalls).toBe(priorAccepted ? 1 : 0);
+        expect(onStepFinish).toHaveBeenCalledTimes(priorAccepted ? 1 : 0);
+        if (priorAccepted)
+          expect(onStepFinish.mock.calls[0]?.[0]).toMatchObject({
+            text: 'EARLIER_ACCEPTED',
+            usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
+          });
+        expect(judge).not.toHaveBeenCalled();
+        expect(await agent.getObjective({ threadId: scope.threadId })).toMatchObject({ status: 'active', runsUsed: 0 });
+        expect(chunks.filter(chunk => chunk.type === 'goal')).toHaveLength(0);
         const history = JSON.stringify((await memory.recall(scope)).messages);
-        expect(history).toContain('EARLIER_ACCEPTED');
-        expect(history).toContain('earlier-tool');
+        if (priorAccepted) {
+          expect(history).toContain('EARLIER_ACCEPTED');
+          expect(history).toContain('earlier-tool');
+        } else {
+          expect((await memory.recall(scope)).messages.filter(message => message.role === 'assistant')).toHaveLength(0);
+        }
         expect(history).not.toContain('VISIBLE_DISCARDED');
         expect(history).not.toContain('HELD_DISCARDED');
-        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(2);
+        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(priorAccepted ? 1 : 0);
         expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
         expect(onFinish).not.toHaveBeenCalled();
         expect(chunks.filter(chunk => chunk.type === 'abort')).toHaveLength(cancellation === 'caller' ? 1 : 0);
@@ -1064,8 +1102,9 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         const finish = chunks.find(chunk => chunk.type === 'finish');
         expect(finish?.payload.stepResult.reason).toBe(cancellation === 'caller' ? 'abort' : 'error');
         const totals = await stream.output.totalUsage;
-        expect(totals.inputTokens).toBe(usage.inputTokens === undefined ? undefined : 5 + usage.inputTokens);
-        expect(totals.outputTokens).toBe(usage.outputTokens === undefined ? undefined : 3 + usage.outputTokens);
+        if (priorAccepted) expect(totals).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
+        else expect(Object.values(totals).every(value => value === undefined || value === 0)).toBe(true);
+        expect(await stream.output.steps).toHaveLength(priorAccepted ? 1 : 0);
       } finally {
         held.release();
         stream.abort();
@@ -1077,6 +1116,94 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     },
     10_000,
   );
+
+  it('preserves terminal timeout with the interrupting signal still queued', async () => {
+    const held = barrier();
+    let processing = false;
+    let requests = 0;
+    let queuedSignalId: string | undefined;
+    const onError = vi.fn();
+    const onStepFinish = vi.fn();
+    const memory = new MockMemory();
+    const { agent, customPubsub } = createOwner(engine, {
+      id: crypto.randomUUID(),
+      name: 'Queued timeout precedence',
+      instructions: 'Test',
+      memory,
+      model: new MockLanguageModelV2({
+        doStream: async ({ abortSignal }) => {
+          if (++requests > 1) return { warnings: [], stream: convertArrayToReadableStream(answer()) };
+          return {
+            warnings: [],
+            stream: new ReadableStream<LanguageModelV2StreamPart>({
+              start(controller) {
+                controller.enqueue({ type: 'stream-start', warnings: [] });
+                controller.enqueue({ type: 'reasoning-start', id: 'queued-timeout' });
+                controller.enqueue({
+                  type: 'reasoning-delta',
+                  id: 'queued-timeout',
+                  delta: 'QUEUED_TIMEOUT_DISCARDED',
+                });
+                abortSignal?.addEventListener('abort', () => controller.error(abortSignal.reason), { once: true });
+              },
+            }),
+          };
+        },
+      }),
+      outputProcessors: [
+        {
+          id: 'timeout-settlement',
+          async processOutputStream({ part }) {
+            if (part.type === 'reasoning-delta') {
+              processing = true;
+              await held.promise;
+            }
+            return part;
+          },
+        },
+      ],
+    });
+    const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
+    const stream = await agent.stream('initial question', {
+      memory: { thread: scope.threadId, resource: scope.resourceId },
+      maxSteps: 1,
+      modelSettings: { timeout: { totalMs: 1200 } },
+      onError,
+      onStepFinish,
+    });
+    const entry = globalRunRegistry.get(stream.runId)!;
+    const chunks: ChunkType[] = [];
+    const consumption = collect(stream.fullStream, chunks);
+    try {
+      await vi.waitFor(() => expect(processing).toBe(true));
+      const queued = await agent.sendSignal({ type: 'user', contents: 'QUEUED_TIMEOUT_SIGNAL' }, scope);
+      queuedSignalId = queued.signal.id;
+      await queued.accepted;
+      expect([...entry.modelAttempts!.values()].at(-1)?.discarded).toBe(true);
+      const drain = vi.fn(entry.drainPendingSignals);
+      entry.drainPendingSignals = drain;
+      await vi.waitFor(() => expect(entry.abortSignal?.aborted).toBe(true), { timeout: 2500 });
+      held.release();
+      await consumption;
+      await entry.workflowExecution;
+      expect(drain).not.toHaveBeenCalled();
+      expect(chunks.filter(chunk => chunk.type === 'error')).toHaveLength(1);
+      expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
+      expect(chunks.find(chunk => chunk.type === 'finish')?.payload.stepResult.reason).toBe('error');
+      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(0);
+      expect(onStepFinish).not.toHaveBeenCalled();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(await stream.output.steps).toHaveLength(0);
+    } finally {
+      if (queuedSignalId) agent.cancelQueuedMessages({ ...scope, signalIds: [queuedSignalId] });
+      held.release();
+      stream.abort();
+      await consumption.catch(() => {});
+      await entry.workflowExecution;
+      stream.cleanup();
+      await customPubsub?.close();
+    }
+  });
 
   it('preempts a fallback without inheriting failed primary usage or consuming processor retries', async () => {
     const prompts: unknown[] = [];
@@ -1165,13 +1292,9 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         expect.objectContaining({ inputTokens: 77 }),
         expect.objectContaining({ inputTokens: 77 }),
       ]);
-      expect(onStepFinish.mock.calls[0]?.[0].usage.inputTokens).toBeUndefined();
-      expect(onStepFinish.mock.calls[1]?.[0].usage.inputTokens).toBe(5);
-      expect(await stream.output.totalUsage).toMatchObject({
-        inputTokens: undefined,
-        outputTokens: undefined,
-        totalTokens: undefined,
-      });
+      expect(onStepFinish).toHaveBeenCalledTimes(1);
+      expect(onStepFinish.mock.calls[0]?.[0].usage.inputTokens).toBe(5);
+      expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
       expect(JSON.stringify(prompts[1])).toContain('FALLBACK_SIGNAL');
       expect(JSON.stringify(prompts[1])).not.toContain('FALLBACK_DISCARDED');
       expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('FALLBACK_DISCARDED');
@@ -1242,13 +1365,13 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       await consumption;
       await entry.workflowExecution;
       expect(prompts).toHaveLength(2);
-      expect(onStepFinish.mock.calls[0]?.[0].usage).toMatchObject(usage);
-      expect(onStepFinish.mock.calls[0]?.[0].content).toEqual([]);
-      expect(await stream.output.totalUsage).toMatchObject({
-        inputTokens: inputTokens + 5,
-        outputTokens: outputTokens + 3,
-        totalTokens: inputTokens + outputTokens + 8,
+      expect(onStepFinish).toHaveBeenCalledTimes(1);
+      expect(onStepFinish.mock.calls[0]?.[0]).toMatchObject({
+        text: 'replacement answer',
+        usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
       });
+      expect(await stream.output.steps).toHaveLength(1);
+      expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
       expect(JSON.stringify(prompts[1])).not.toContain('MEASURED_DISCARDED');
       expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('MEASURED_DISCARDED');
     } finally {
@@ -1474,8 +1597,12 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('FAILED_REASONING');
       expect(onError).not.toHaveBeenCalled();
       expect(onAbort).not.toHaveBeenCalled();
-      expect(onStepFinish).toHaveBeenCalledTimes(2);
-      expect(onStepFinish.mock.calls[0]?.[0].content).toEqual([]);
+      expect(onStepFinish).toHaveBeenCalledTimes(1);
+      expect(onStepFinish.mock.calls[0]?.[0]).toMatchObject({
+        text: 'replacement answer',
+        reasoning: [],
+        usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
+      });
       expect(chunks.filter(chunk => chunk.type === 'reasoning-end')).toHaveLength(phase === 'stream' ? 1 : 0);
       expect(chunks.some(chunk => chunk.type === 'abort' || chunk.type === 'error')).toBe(false);
       expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
