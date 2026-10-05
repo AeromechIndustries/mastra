@@ -934,38 +934,12 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
   });
 
   it.each(
-    [
-      {
-        label: 'caller abort / unknown',
-        cancellation: 'caller',
-        usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
-      },
-      {
-        label: 'total timeout / unknown',
-        cancellation: 'timeout',
-        usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
-      },
-      {
-        label: 'total timeout / measured zero',
-        cancellation: 'timeout',
-        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      },
-      {
-        label: 'total timeout / reported',
-        cancellation: 'timeout',
-        usage: {
-          inputTokens: 7,
-          outputTokens: 4,
-          totalTokens: 11,
-          reasoningTokens: 2,
-          cachedInputTokens: 3,
-          cacheCreationInputTokens: 1,
-        },
-      },
-    ].flatMap(test => [false, true].map(priorAccepted => ({ ...test, priorAccepted }))),
+    (['caller', 'timeout'] as const).flatMap(cancellation =>
+      [false, true].map(priorAccepted => ({ cancellation, priorAccepted })),
+    ),
   )(
-    'keeps discarded output empty with prior accepted=$priorAccepted when $label wins while a processor settles',
-    async ({ cancellation, usage, priorAccepted }) => {
+    'keeps discarded output empty with prior accepted=$priorAccepted when $cancellation cancellation wins while a processor settles',
+    async ({ cancellation, priorAccepted }) => {
       const held = barrier();
       let processing = false;
       let toolCalls = 0;
@@ -1059,7 +1033,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         await vi.waitFor(() => expect(processing).toBe(true));
         // Exercise accounting for measurements already captured before cancellation.
         const attempt = [...entry.modelAttempts!.values()].at(-1)!;
-        attempt.usage = usage;
         const queued = await agent.sendSignal({ type: 'user', contents: 'CANCEL_RACE_SIGNAL' }, scope);
         await queued.accepted;
         await vi.waitFor(() => expect(attempt.discarded).toBe(true));

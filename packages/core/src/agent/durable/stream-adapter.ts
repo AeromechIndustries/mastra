@@ -789,11 +789,7 @@ export async function emitChunkEvent<OUTPUT = undefined>(
   outputProcessed?: boolean,
 ): Promise<void> {
   const topic = AGENT_STREAM_TOPIC(runId);
-  const attempt =
-    getModelAttempt(chunk) ??
-    (chunk.type === 'step-finish' && chunk.payload.output.steps?.[0]
-      ? getModelAttempt(chunk.payload.output.steps[0])
-      : undefined);
+  const attempt = getModelAttempt(chunk);
   await pubsub.publish(topic, {
     type: AgentStreamEventTypes.CHUNK,
     runId,
