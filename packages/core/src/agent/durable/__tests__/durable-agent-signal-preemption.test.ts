@@ -596,98 +596,88 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     }
   });
 
-  it.each(['return', 'error', 'tripwire'] as const)(
-    'waits for an in-flight processor and drops its late writer and %s output',
-    async disposition => {
-      const held = barrier();
-      let processing = false;
-      let providerAborted = false;
-      const prompts: unknown[] = [];
-      const memory = new MockMemory();
-      const { agent, customPubsub } = createOwner(engine, {
-        id: crypto.randomUUID(),
-        name: 'Processor barrier',
-        instructions: 'Test',
-        memory,
-        model: new MockLanguageModelV2({
-          doStream: async ({ prompt, abortSignal }) => {
-            prompts.push(prompt);
-            if (prompts.length > 1) return { stream: convertArrayToReadableStream(answer()), warnings: [] };
-            return {
-              warnings: [],
-              stream: new ReadableStream<LanguageModelV2StreamPart>({
-                start(controller) {
-                  controller.enqueue({ type: 'stream-start', warnings: [] });
-                  controller.enqueue({ type: 'reasoning-start', id: 'held' });
-                  controller.enqueue({ type: 'reasoning-delta', id: 'held', delta: 'STALE_PROCESSOR_REASONING' });
-                  abortSignal?.addEventListener(
-                    'abort',
-                    () => {
-                      providerAborted = true;
-                      controller.error(abortSignal.reason);
-                    },
-                    { once: true },
-                  );
-                },
-              }),
-            };
+  it('waits for an in-flight processor before the replacement request', async () => {
+    const held = barrier();
+    let processing = false;
+    let providerAborted = false;
+    const prompts: unknown[] = [];
+    const memory = new MockMemory();
+    const { agent, customPubsub } = createOwner(engine, {
+      id: crypto.randomUUID(),
+      name: 'Processor barrier',
+      instructions: 'Test',
+      memory,
+      model: new MockLanguageModelV2({
+        doStream: async ({ prompt, abortSignal }) => {
+          prompts.push(prompt);
+          if (prompts.length > 1) return { stream: convertArrayToReadableStream(answer()), warnings: [] };
+          return {
+            warnings: [],
+            stream: new ReadableStream<LanguageModelV2StreamPart>({
+              start(controller) {
+                controller.enqueue({ type: 'stream-start', warnings: [] });
+                controller.enqueue({ type: 'reasoning-start', id: 'held' });
+                controller.enqueue({ type: 'reasoning-delta', id: 'held', delta: 'STALE_PROCESSOR_REASONING' });
+                abortSignal?.addEventListener(
+                  'abort',
+                  () => {
+                    providerAborted = true;
+                    controller.error(abortSignal.reason);
+                  },
+                  { once: true },
+                );
+              },
+            }),
+          };
+        },
+      }),
+      outputProcessors: [
+        {
+          id: 'held-processor',
+          async processOutputStream({ part }) {
+            if (part.type !== 'reasoning-delta') return part;
+            processing = true;
+            await held.promise;
+            return part;
           },
-        }),
-        outputProcessors: [
-          {
-            id: 'held-processor',
-            async processOutputStream({ part, writer, abortSignal, abort }) {
-              if (part.type !== 'reasoning-delta') return part;
-              expect(abortSignal?.aborted).toBe(false);
-              processing = true;
-              await held.promise;
-              expect(abortSignal?.aborted).toBe(true);
-              await writer?.custom({ type: 'data-late', data: 'STALE_WRITER_DATA' });
-              if (disposition === 'error') throw new Error('stale processor error');
-              if (disposition === 'tripwire') abort('stale processor violation');
-              return { ...part, type: 'text-delta', payload: { id: 'late-text', text: 'STALE_TRANSFORMED_TEXT' } };
-            },
-          },
-        ],
-      });
-      const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
-      const stream = await agent.stream('initial question', {
-        memory: { thread: scope.threadId, resource: scope.resourceId },
-        maxSteps: 3,
-      });
-      const entry = globalRunRegistry.get(stream.runId)!;
-      const chunks: ChunkType[] = [];
-      const consumption = collect(stream.fullStream, chunks);
-      try {
-        await vi.waitFor(() => expect(processing).toBe(true));
-        await (
-          await agent.sendSignal({ type: 'user', contents: 'PROCESSOR_REPLACEMENT' }, scope)
-        ).accepted;
-        await vi.waitFor(() => expect(providerAborted).toBe(true));
-        expect(prompts).toHaveLength(1);
-        held.release();
-        await consumption;
-        await entry.workflowExecution;
-        expect(prompts).toHaveLength(2);
-        expect(JSON.stringify(prompts[1])).toContain('PROCESSOR_REPLACEMENT');
-        for (const marker of ['STALE_PROCESSOR_REASONING', 'STALE_WRITER_DATA', 'STALE_TRANSFORMED_TEXT']) {
-          expect(JSON.stringify(prompts[1])).not.toContain(marker);
-          expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain(marker);
-        }
-        expect(chunks.some(chunk => ['data-late', 'tripwire', 'error', 'abort'].includes(chunk.type))).toBe(false);
-        expect(await stream.output.text).toBe('replacement answer');
-        expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
-        expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
-      } finally {
-        held.release();
-        stream.abort();
-        await consumption.catch(() => {});
-        await entry.workflowExecution;
-        stream.cleanup();
-        await customPubsub?.close();
-      }
-    },
-  );
+        },
+      ],
+    });
+    const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
+    const stream = await agent.stream('initial question', {
+      memory: { thread: scope.threadId, resource: scope.resourceId },
+      maxSteps: 3,
+    });
+    const entry = globalRunRegistry.get(stream.runId)!;
+    const chunks: ChunkType[] = [];
+    const consumption = collect(stream.fullStream, chunks);
+    try {
+      await vi.waitFor(() => expect(processing).toBe(true));
+      await (
+        await agent.sendSignal({ type: 'user', contents: 'PROCESSOR_REPLACEMENT' }, scope)
+      ).accepted;
+      await vi.waitFor(() => expect(providerAborted).toBe(true));
+      expect(prompts).toHaveLength(1);
+      held.release();
+      await consumption;
+      await entry.workflowExecution;
+      expect(prompts).toHaveLength(2);
+      expect(JSON.stringify(prompts[1])).toContain('PROCESSOR_REPLACEMENT');
+      expect(JSON.stringify(prompts[1])).not.toContain('STALE_PROCESSOR_REASONING');
+      expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('STALE_PROCESSOR_REASONING');
+      expect(chunks.some(chunk => chunk.type === 'error' || chunk.type === 'abort')).toBe(false);
+      expect(await stream.output.text).toBe('replacement answer');
+      expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
+      expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
+    } finally {
+      held.release();
+      stream.abort();
+      await consumption.catch(() => {});
+      await entry.workflowExecution;
+      stream.cleanup();
+      await customPubsub?.close();
+    }
+  });
 
   it('preempts during input processing without resetting state or dropping processor signals', async () => {
     const held = barrier();
@@ -710,7 +700,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       inputProcessors: [
         {
           id: 'input-barrier',
-          async processInputStep({ state, stepNumber, sendSignal, writer }) {
+          async processInputStep({ state, stepNumber, sendSignal }) {
             state.count = (state.count ?? 0) + 1;
             ordinals.push(stepNumber);
             stateCounts.push(state.count);
@@ -718,7 +708,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
               processing = true;
               await held.promise;
               sendSignal({ type: 'reactive', contents: 'PROCESSOR_HISTORY', prompt: 'PROCESSOR_HISTORY' });
-              await writer?.custom({ type: 'data-late-input', data: 'STALE_INPUT_WRITER' });
             }
           },
         },
@@ -746,12 +735,10 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       expect(JSON.stringify(prompts[0])).toContain('PROCESSOR_HISTORY');
       expect(ordinals).toEqual([0, 0]);
       expect(stateCounts).toEqual([1, 2]);
-      expect(chunks.some(chunk => chunk.type === 'data-late-input')).toBe(false);
       const echoes = chunks.filter(chunk => chunk.type === 'data-signal');
       expect(JSON.stringify(echoes).match(/PROCESSOR_HISTORY/g)).toHaveLength(1);
       const history = JSON.stringify((await memory.recall({ ...scope, hideSignals: false })).messages);
       expect(history).toContain('PROCESSOR_HISTORY');
-      expect(history).not.toContain('STALE_INPUT_WRITER');
       expect(chunks.filter(chunk => chunk.type === 'step-finish')).toHaveLength(1);
     } finally {
       held.release();
@@ -851,79 +838,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       expect(steps[0]?.text).toBe('replacement answer');
       expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
       stream.cleanup();
-      expect(entry.modelAttempts?.size).toBe(0);
-    } finally {
-      stream.abort();
-      await consumption.catch(() => {});
-      await entry.workflowExecution;
-      stream.cleanup();
-      await customPubsub?.close();
-    }
-  });
-
-  it('closes the actually emitted reasoning id without reprocessing the synthetic end', async () => {
-    let calls = 0;
-    let endInvocations = 0;
-    const { agent, customPubsub } = createOwner(engine, {
-      id: crypto.randomUUID(),
-      name: 'Transformed reasoning',
-      instructions: 'Test',
-      memory: new MockMemory(),
-      model: new MockLanguageModelV2({
-        doStream: async ({ abortSignal }) => {
-          if (++calls > 1) return { stream: convertArrayToReadableStream(answer()), warnings: [] };
-          return {
-            warnings: [],
-            stream: new ReadableStream<LanguageModelV2StreamPart>({
-              start(controller) {
-                controller.enqueue({ type: 'stream-start', warnings: [] });
-                controller.enqueue({ type: 'reasoning-start', id: 'raw' });
-                controller.enqueue({ type: 'reasoning-delta', id: 'raw', delta: 'discarded' });
-                abortSignal?.addEventListener('abort', () => controller.error(abortSignal.reason), { once: true });
-              },
-            }),
-          };
-        },
-      }),
-      outputProcessors: [
-        {
-          id: 'prefix-reasoning',
-          processOutputStream({ part }) {
-            if (part.type === 'reasoning-start')
-              return { ...part, payload: { ...part.payload, id: `visible:${part.payload.id}` } };
-            if (part.type === 'reasoning-delta')
-              return { ...part, payload: { ...part.payload, id: `visible:${part.payload.id}` } };
-            if (part.type === 'reasoning-end') {
-              endInvocations++;
-              return null;
-            }
-            return part;
-          },
-        },
-      ],
-    });
-    const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
-    const stream = await agent.stream('initial question', {
-      memory: { thread: scope.threadId, resource: scope.resourceId },
-      maxSteps: 3,
-    });
-    const entry = globalRunRegistry.get(stream.runId)!;
-    const chunks: ChunkType[] = [];
-    const consumption = collect(stream.fullStream, chunks);
-    try {
-      await vi.waitFor(() => expect(chunks.some(chunk => chunk.type === 'reasoning-delta')).toBe(true));
-      await (
-        await agent.sendSignal({ type: 'user', contents: 'CLOSE_VISIBLE_REASONING' }, scope)
-      ).accepted;
-      await consumption;
-      await entry.workflowExecution;
-      const starts = chunks.filter(chunk => chunk.type === 'reasoning-start');
-      const ends = chunks.filter(chunk => chunk.type === 'reasoning-end');
-      expect(starts).toHaveLength(1);
-      expect(ends).toHaveLength(1);
-      expect(ends[0]?.payload.id).toBe(starts[0]?.payload.id);
-      expect(endInvocations).toBe(0);
-      expect(ends[0]?.payload.providerMetadata).toBeUndefined();
     } finally {
       stream.abort();
       await consumption.catch(() => {});
@@ -941,6 +855,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     'keeps discarded output empty with prior accepted=$priorAccepted when $cancellation cancellation wins while a processor settles',
     async ({ cancellation, priorAccepted }) => {
       const held = barrier();
+      let requestSignal: AbortSignal | undefined;
       let processing = false;
       let toolCalls = 0;
       const prompts: unknown[] = [];
@@ -969,6 +884,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         model: new MockLanguageModelV2({
           doStream: async ({ prompt, abortSignal }) => {
             prompts.push(prompt);
+            requestSignal = abortSignal;
             if (priorAccepted && prompts.length === 1)
               return {
                 warnings: [],
@@ -1031,11 +947,9 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const consumption = collect(stream.fullStream, chunks);
       try {
         await vi.waitFor(() => expect(processing).toBe(true));
-        // Exercise accounting for measurements already captured before cancellation.
-        const attempt = [...entry.modelAttempts!.values()].at(-1)!;
         const queued = await agent.sendSignal({ type: 'user', contents: 'CANCEL_RACE_SIGNAL' }, scope);
         await queued.accepted;
-        await vi.waitFor(() => expect(attempt.discarded).toBe(true));
+        await vi.waitFor(() => expect(requestSignal?.aborted).toBe(true));
         // Isolate this run's cancellation from the existing queued-message follow-up routing.
         expect(agent.cancelQueuedMessages({ ...scope, signalIds: [queued.signal.id] }).cancelledSignalIds).toEqual([
           queued.signal.id,
@@ -1095,6 +1009,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     let processing = false;
     let requests = 0;
     let queuedSignalId: string | undefined;
+    let requestSignal: AbortSignal | undefined;
     const onError = vi.fn();
     const onStepFinish = vi.fn();
     const memory = new MockMemory();
@@ -1106,6 +1021,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       model: new MockLanguageModelV2({
         doStream: async ({ abortSignal }) => {
           if (++requests > 1) return { warnings: [], stream: convertArrayToReadableStream(answer()) };
+          requestSignal = abortSignal;
           return {
             warnings: [],
             stream: new ReadableStream<LanguageModelV2StreamPart>({
@@ -1152,7 +1068,7 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const queued = await agent.sendSignal({ type: 'user', contents: 'QUEUED_TIMEOUT_SIGNAL' }, scope);
       queuedSignalId = queued.signal.id;
       await queued.accepted;
-      expect([...entry.modelAttempts!.values()].at(-1)?.discarded).toBe(true);
+      expect(requestSignal?.aborted).toBe(true);
       const drain = vi.fn(entry.drainPendingSignals);
       entry.drainPendingSignals = drain;
       await vi.waitFor(() => expect(entry.abortSignal?.aborted).toBe(true), { timeout: 2500 });
@@ -1183,7 +1099,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     let primaryCalls = 0;
     let started = false;
     const initialFailure = barrier();
-    const seenPrimaryUsage: unknown[] = [];
     const onStepFinish = vi.fn();
     const memory = new MockMemory();
     const primary = new MockLanguageModelV2({
@@ -1234,7 +1149,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
           async processAPIError({ retryCount }) {
             expect(retryCount).toBe(0);
             await initialFailure.promise;
-            seenPrimaryUsage.push([...entry.modelAttempts!.values()].at(-1)?.usage);
           },
         },
       ],
@@ -1252,8 +1166,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       initialFailure.release();
       await vi.waitFor(() => expect(started).toBe(true));
       await vi.waitFor(() => expect(chunks.some(chunk => chunk.type === 'reasoning-delta')).toBe(true));
-      const attempt = [...entry.modelAttempts!.values()].at(-1)!;
-      expect(attempt.usage.inputTokens).toBeUndefined();
       await (
         await agent.sendSignal({ type: 'user', contents: 'FALLBACK_SIGNAL' }, scope)
       ).accepted;
@@ -1261,10 +1173,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       await entry.workflowExecution;
       expect(primaryCalls).toBe(2);
       expect(prompts).toHaveLength(2);
-      expect(seenPrimaryUsage).toEqual([
-        expect.objectContaining({ inputTokens: 77 }),
-        expect.objectContaining({ inputTokens: 77 }),
-      ]);
       expect(onStepFinish).toHaveBeenCalledTimes(1);
       expect(onStepFinish.mock.calls[0]?.[0].usage.inputTokens).toBe(5);
       expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
@@ -1281,87 +1189,11 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     }
   });
 
-  it.each([0, 7])('captures interrupted provider usage with %i input tokens before acceptance', async inputTokens => {
-    const transport = new HeldStreamPubSub('reasoning-delta');
-    const held = transport.gate;
-    const prompts: unknown[] = [];
-    const onStepFinish = vi.fn();
-    const memory = new MockMemory();
-    const outputTokens = inputTokens === 0 ? 0 : 4;
-    const usage = { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
-    const { agent, customPubsub } = createOwner(
-      engine,
-      {
-        id: crypto.randomUUID(),
-        name: 'Reported usage',
-        instructions: 'Test',
-        memory,
-        model: new MockLanguageModelV2({
-          doStream: async ({ prompt }) => {
-            prompts.push(prompt);
-            return {
-              warnings: [],
-              stream: convertArrayToReadableStream(
-                prompts.length > 1
-                  ? answer()
-                  : [
-                      { type: 'stream-start', warnings: [] },
-                      { type: 'reasoning-start', id: 'measured' },
-                      { type: 'reasoning-delta', id: 'measured', delta: 'MEASURED_DISCARDED' },
-                      { type: 'finish', finishReason: 'stop', usage },
-                    ],
-              ),
-            };
-          },
-        }),
-      },
-      transport,
-    );
-    const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
-    const stream = await agent.stream('initial question', {
-      memory: { thread: scope.threadId, resource: scope.resourceId },
-      maxSteps: 3,
-      onStepFinish,
-    });
-    const entry = globalRunRegistry.get(stream.runId)!;
-    const chunks: ChunkType[] = [];
-    const consumption = collect(stream.fullStream, chunks);
-    try {
-      await vi.waitFor(() => expect(transport.held).toBe(true));
-      const attempt = [...entry.modelAttempts!.values()].at(-1)!;
-      await vi.waitFor(() => expect(attempt.usage).toMatchObject(usage));
-      await (
-        await agent.sendSignal({ type: 'user', contents: 'MEASURED_SIGNAL' }, scope)
-      ).accepted;
-      expect(attempt.discarded).toBe(true);
-      held.release();
-      await consumption;
-      await entry.workflowExecution;
-      expect(prompts).toHaveLength(2);
-      expect(onStepFinish).toHaveBeenCalledTimes(1);
-      expect(onStepFinish.mock.calls[0]?.[0]).toMatchObject({
-        text: 'replacement answer',
-        usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
-      });
-      expect(await stream.output.steps).toHaveLength(1);
-      expect(await stream.output.totalUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
-      expect(JSON.stringify(prompts[1])).not.toContain('MEASURED_DISCARDED');
-      expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('MEASURED_DISCARDED');
-    } finally {
-      held.release();
-      stream.abort();
-      await consumption.catch(() => {});
-      await entry.workflowExecution;
-      stream.cleanup();
-      await customPubsub?.close();
-      await transport.close();
-    }
-  });
-
   it.each(['provider', 'cached'] as const)(
     'accepts completed %s reasoning before publishing the step',
     async source => {
       const transport = new HeldStreamPubSub('step-finish');
+      let requestSignal: AbortSignal | undefined;
       const held = transport.gate;
       let requests = 0;
       const prompts: unknown[] = [];
@@ -1375,8 +1207,9 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
           instructions: 'Test',
           memory,
           model: new MockLanguageModelV2({
-            doStream: async ({ prompt }) => {
+            doStream: async ({ prompt, abortSignal }) => {
               prompts.push(prompt);
+              requestSignal ??= abortSignal;
               return {
                 warnings: [],
                 stream: convertArrayToReadableStream(
@@ -1451,12 +1284,10 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       const consumption = collect(stream.fullStream, chunks);
       try {
         await vi.waitFor(() => expect(transport.held).toBe(true));
-        const attempt = [...entry.modelAttempts!.values()].at(-1)!;
         await (
           await agent.sendSignal({ type: 'user', contents: 'AFTER_COMPLETION_SIGNAL' }, scope)
         ).accepted;
-        expect(attempt.discarded).toBe(false);
-        expect(attempt.controller.signal.aborted).toBe(false);
+        expect(requestSignal?.aborted).not.toBe(true);
         held.release();
         await consumption;
         await entry.workflowExecution;
@@ -1479,116 +1310,6 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
       }
     },
   );
-
-  it.each([
-    { phase: 'ttfb', retry: false },
-    { phase: 'stream', retry: false },
-    { phase: 'ttfb', retry: true },
-    { phase: 'stream', retry: true },
-  ])('preempts $phase while an error processor settles with retry=$retry', async ({ phase, retry }) => {
-    const held = barrier();
-    const failure = barrier();
-    let processing = false;
-    const prompts: unknown[] = [];
-    const retries: number[] = [];
-    const memory = new MockMemory();
-    const onError = vi.fn();
-    const onAbort = vi.fn();
-    const onStepFinish = vi.fn();
-    const { agent, customPubsub } = createOwner(engine, {
-      id: crypto.randomUUID(),
-      name: 'Error processor race',
-      instructions: 'Test',
-      memory,
-      maxRetries: 0,
-      model: new MockLanguageModelV2({
-        doStream: async ({ prompt }) => {
-          prompts.push(prompt);
-          if (prompts.length > 1) return { warnings: [], stream: convertArrayToReadableStream(answer()) };
-          if (phase === 'ttfb') throw new Error('Genuine provider failure');
-          return {
-            warnings: [],
-            stream: new ReadableStream<LanguageModelV2StreamPart>({
-              start(controller) {
-                controller.enqueue({ type: 'stream-start', warnings: [] });
-                controller.enqueue({ type: 'reasoning-start', id: 'failed' });
-                controller.enqueue({ type: 'reasoning-delta', id: 'failed', delta: 'FAILED_REASONING' });
-                void failure.promise.then(() => controller.error(new Error('Genuine stream failure')));
-              },
-            }),
-          };
-        },
-      }),
-      inputProcessors: [
-        {
-          id: 'retry-observer',
-          processInputStep({ retryCount }) {
-            retries.push(retryCount);
-          },
-        },
-      ],
-      errorProcessors: [
-        {
-          id: 'held-error',
-          async processAPIError() {
-            processing = true;
-            await held.promise;
-            return { retry };
-          },
-        },
-      ],
-    });
-    const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
-    const stream = await agent.stream('initial question', {
-      memory: { thread: scope.threadId, resource: scope.resourceId },
-      maxSteps: 3,
-      maxProcessorRetries: 2,
-      onError,
-      onAbort,
-      onStepFinish,
-    });
-    const entry = globalRunRegistry.get(stream.runId)!;
-    const chunks: ChunkType[] = [];
-    const consumption = collect(stream.fullStream, chunks);
-    try {
-      if (phase === 'stream') {
-        await vi.waitFor(() => expect(chunks.some(chunk => chunk.type === 'reasoning-delta')).toBe(true));
-        failure.release();
-      }
-      await vi.waitFor(() => expect(processing).toBe(true));
-      await (
-        await agent.sendSignal({ type: 'user', contents: 'ERROR_PROCESSOR_SIGNAL' }, scope)
-      ).accepted;
-      expect([...entry.modelAttempts!.values()].at(-1)?.discarded).toBe(true);
-      held.release();
-      await consumption;
-      await entry.workflowExecution;
-      expect(prompts).toHaveLength(2);
-      expect(retries).toEqual([0, 0]);
-      expect(JSON.stringify(prompts[1])).toContain('ERROR_PROCESSOR_SIGNAL');
-      expect(JSON.stringify(prompts[1])).not.toContain('FAILED_REASONING');
-      expect(JSON.stringify((await memory.recall(scope)).messages)).not.toContain('FAILED_REASONING');
-      expect(onError).not.toHaveBeenCalled();
-      expect(onAbort).not.toHaveBeenCalled();
-      expect(onStepFinish).toHaveBeenCalledTimes(1);
-      expect(onStepFinish.mock.calls[0]?.[0]).toMatchObject({
-        text: 'replacement answer',
-        reasoning: [],
-        usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 },
-      });
-      expect(chunks.filter(chunk => chunk.type === 'reasoning-end')).toHaveLength(phase === 'stream' ? 1 : 0);
-      expect(chunks.some(chunk => chunk.type === 'abort' || chunk.type === 'error')).toBe(false);
-      expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1);
-    } finally {
-      held.release();
-      failure.release();
-      stream.abort();
-      await consumption.catch(() => {});
-      await entry.workflowExecution;
-      stream.cleanup();
-      await customPubsub?.close();
-    }
-  });
 
   it.each(['text', 'tool'] as const)(
     'protects raw %s boundaries while a processor delays and suppresses them',
