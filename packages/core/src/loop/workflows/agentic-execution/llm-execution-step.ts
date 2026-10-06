@@ -94,7 +94,7 @@ import { applyAutoResumeSystemMessage } from '../../shared/auto-resume-system-me
 import { buildLlmPromptArgs } from '../../shared/build-llm-prompt-args';
 import { composeStepInput } from '../../shared/compose-step-input';
 import { injectBackgroundTaskPrompt } from '../../shared/inject-background-task-prompt';
-import { watchInterruptibleStream } from '../../shared/interruptible-stream';
+import { trackOpenReasoning, watchInterruptibleStream } from '../../shared/interruptible-stream';
 import { buildMemoryHeaders, mergeLlmCallHeaders } from '../../shared/merge-llm-call-headers';
 import { persistUnavailableAttachments } from '../../shared/persist-unavailable-attachments';
 import { recordTerminalErrorMessage } from '../../shared/record-terminal-error-message';
@@ -155,6 +155,8 @@ type ProcessOutputStreamResult = {
 
 type ProcessOutputStreamOptions<OUTPUT = undefined> = {
   tools?: ToolSet;
+  /** Reasoning blocks the client has seen open; maintained when interruption is possible. */
+  openReasoningIds?: Set<string>;
   runId: string;
   messageId: string;
   includeRawChunks?: boolean;
@@ -547,6 +549,7 @@ async function processOutputStream<OUTPUT = undefined>({
   modelSpanTracker,
   onCompleteToolCall,
   onModelFinished,
+  openReasoningIds,
 }: ProcessOutputStreamOptions<OUTPUT>): Promise<ProcessOutputStreamResult> {
   let transportSet = false;
   const collectedChunks: CollectedChunk[] = [];
@@ -743,6 +746,7 @@ async function processOutputStream<OUTPUT = undefined>({
     if (!chunk) {
       continue;
     }
+    if (openReasoningIds) trackOpenReasoning(chunk, openReasoningIds);
 
     if (!transportSet && transportRef && transportResolver) {
       const transport = transportResolver();
@@ -2128,7 +2132,6 @@ export function createLLMExecutionStep<TOOLS extends ToolSet = ToolSet, OUTPUT =
                 modelResult as ReadableStream<ChunkType<OUTPUT>>,
                 interruption.signal,
                 () => (interruptible = false),
-                openReasoningIds,
               )
             : (modelResult as ReadableStream<ChunkType<OUTPUT>>),
           messageList,
@@ -2177,6 +2180,7 @@ export function createLLMExecutionStep<TOOLS extends ToolSet = ToolSet, OUTPUT =
         try {
           const { collectedChunks, toolResultTripwire: streamToolResultTripwire } = await processOutputStream({
             outputStream,
+            openReasoningIds: subscribePendingSignals ? openReasoningIds : undefined,
             includeRawChunks,
             tools: currentStep.tools,
             runId,
