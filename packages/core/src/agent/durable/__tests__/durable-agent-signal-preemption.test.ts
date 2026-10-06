@@ -1009,6 +1009,80 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
     10_000,
   );
 
+  it.each(['transformed', 'suppressed'] as const)(
+    'closes only reasoning the client saw open when a processor %s it',
+    async outcome => {
+      let calls = 0;
+      let endInvocations = 0;
+      let processedDelta = false;
+      const { agent, customPubsub } = createOwner(engine, {
+        id: crypto.randomUUID(),
+        name: 'Transformed reasoning',
+        instructions: 'Test',
+        memory: new MockMemory(),
+        model: new MockLanguageModelV2({
+          doStream: async ({ abortSignal }) => {
+            if (++calls > 1) return { stream: convertArrayToReadableStream(answer()), warnings: [] };
+            return {
+              warnings: [],
+              stream: new ReadableStream<LanguageModelV2StreamPart>({
+                start(controller) {
+                  controller.enqueue({ type: 'stream-start', warnings: [] });
+                  controller.enqueue({ type: 'reasoning-start', id: 'raw' });
+                  controller.enqueue({ type: 'reasoning-delta', id: 'raw', delta: 'discarded' });
+                  abortSignal?.addEventListener('abort', () => controller.error(abortSignal.reason), { once: true });
+                },
+              }),
+            };
+          },
+        }),
+        outputProcessors: [
+          {
+            id: 'prefix-reasoning',
+            processOutputStream({ part }) {
+              if (part.type === 'reasoning-end') {
+                endInvocations++;
+                return null;
+              }
+              if (part.type !== 'reasoning-start' && part.type !== 'reasoning-delta') return part;
+              if (part.type === 'reasoning-delta') processedDelta = true;
+              if (outcome === 'suppressed') return null;
+              return { ...part, payload: { ...part.payload, id: `visible:${part.payload.id}` } } as typeof part;
+            },
+          },
+        ],
+      });
+      const scope = { threadId: crypto.randomUUID(), resourceId: crypto.randomUUID() };
+      const stream = await agent.stream('initial question', {
+        memory: { thread: scope.threadId, resource: scope.resourceId },
+        maxSteps: 3,
+      });
+      const entry = globalRunRegistry.get(stream.runId)!;
+      const chunks: ChunkType[] = [];
+      const consumption = collect(stream.fullStream, chunks);
+      try {
+        await vi.waitFor(() => expect(processedDelta).toBe(true));
+        await (
+          await agent.sendSignal({ type: 'user', contents: 'CLOSE_VISIBLE_REASONING' }, scope)
+        ).accepted;
+        await consumption;
+        await entry.workflowExecution;
+        const starts = chunks.filter(chunk => chunk.type === 'reasoning-start');
+        const ends = chunks.filter(chunk => chunk.type === 'reasoning-end');
+        expect(ends.map(chunk => chunk.payload.id)).toEqual(starts.map(chunk => chunk.payload.id));
+        expect(starts).toHaveLength(outcome === 'transformed' ? 1 : 0);
+        expect(endInvocations).toBe(0);
+        expect(ends[0]?.payload.providerMetadata).toBeUndefined();
+      } finally {
+        stream.abort();
+        await consumption.catch(() => {});
+        await entry.workflowExecution;
+        stream.cleanup();
+        await customPubsub?.close();
+      }
+    },
+  );
+
   it('preserves terminal timeout with the interrupting signal still queued', async () => {
     const held = barrier();
     let processing = false;

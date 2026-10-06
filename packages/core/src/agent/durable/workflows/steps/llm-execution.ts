@@ -12,7 +12,7 @@ import { applyAutoResumeSystemMessage } from '../../../../loop/shared/auto-resum
 import { buildLlmPromptArgs } from '../../../../loop/shared/build-llm-prompt-args';
 import { composeStepInput } from '../../../../loop/shared/compose-step-input';
 import { injectBackgroundTaskPrompt } from '../../../../loop/shared/inject-background-task-prompt';
-import { watchInterruptibleStream } from '../../../../loop/shared/interruptible-stream';
+import { trackOpenReasoning, watchInterruptibleStream } from '../../../../loop/shared/interruptible-stream';
 import { buildMemoryHeaders, mergeLlmCallHeaders } from '../../../../loop/shared/merge-llm-call-headers';
 import { persistUnavailableAttachments } from '../../../../loop/shared/persist-unavailable-attachments';
 import { readToolResultFromMessageList } from '../../../../loop/shared/read-tool-result';
@@ -1369,7 +1369,6 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
                     modelResult as unknown as NodeReadableStream<ChunkType>,
                     interruption.signal,
                     () => (interruptible = false),
-                    openReasoningIds,
                   )
                 : modelResult;
 
@@ -1730,6 +1729,7 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
                           if (chunk.type === 'tripwire') {
                             outputStreamBlocked = true;
                           }
+                          trackOpenReasoning(chunk, openReasoningIds);
                           try {
                             await emitChunkEvent(pubsub, runId, chunk, true);
                           } catch (error) {
@@ -1759,6 +1759,7 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
                       break;
                     }
                   } else {
+                    trackOpenReasoning(clientChunk, openReasoningIds);
                     await emitChunkEvent(pubsub, runId, clientChunk);
                   }
                 }
