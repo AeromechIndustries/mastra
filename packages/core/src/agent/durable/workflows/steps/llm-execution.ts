@@ -514,24 +514,6 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
           state: typedInput.state,
         };
       };
-      const initialEchoes = signalRegistry?.initialSignalEchoes?.splice(0) ?? [];
-      const queuedSignals = [
-        ...((inputData.stepIndex ?? 0) === 0 ? (signalRegistry?.drainPendingSignals?.('pre-run') ?? []) : []),
-        ...(signalRegistry?.drainPendingSignals?.('pending') ?? []),
-      ];
-      if (queuedSignals.length) rotateResponseMessageId();
-      const admittedSignals = queuedSignals.map(signal => messageList.addSignal(signal));
-      // Subscribed before the drain above, so nothing queued in between is missed.
-      interruptible = true;
-      const processorPartCounts = new Map<ProcessorState, number>(
-        [...(signalRegistry?.processorStates?.values() ?? [])].map(state => [state, state.streamParts.length]),
-      );
-      if (pubsub) {
-        for (const signal of [...initialEchoes, ...admittedSignals]) {
-          await emitChunkEvent(pubsub, runId, signal.toDataPart());
-        }
-      }
-
       // Processor retries are read from the step history: each rejected step is recorded with
       // finishReason 'retry' and the tripwire that rejected it. Only consecutive retries count.
       // API-error retries happen inside this step and add to the same count, as in Agent.
@@ -557,6 +539,23 @@ export function createDurableLLMExecutionStep(_options?: DurableLLMExecutionStep
         );
         if (pubsub) {
           await emitChunkEvent(pubsub, runId, feedbackSignal.toDataPart() as any);
+        }
+      }
+      const initialEchoes = signalRegistry?.initialSignalEchoes?.splice(0) ?? [];
+      const queuedSignals = [
+        ...((inputData.stepIndex ?? 0) === 0 ? (signalRegistry?.drainPendingSignals?.('pre-run') ?? []) : []),
+        ...(signalRegistry?.drainPendingSignals?.('pending') ?? []),
+      ];
+      if (queuedSignals.length) rotateResponseMessageId();
+      const admittedSignals = queuedSignals.map(signal => messageList.addSignal(signal));
+      // Subscribed before the drain above, so nothing queued in between is missed.
+      interruptible = true;
+      const processorPartCounts = new Map<ProcessorState, number>(
+        [...(signalRegistry?.processorStates?.values() ?? [])].map(state => [state, state.streamParts.length]),
+      );
+      if (pubsub) {
+        for (const signal of [...initialEchoes, ...admittedSignals]) {
+          await emitChunkEvent(pubsub, runId, signal.toDataPart());
         }
       }
       let terminalAttemptContext:

@@ -243,6 +243,9 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
   );
 
   it('drops discarded frames delivered after publish resolves without output processors', async () => {
+    // A new stream subscribes with replay, so the caching transport's index watermark drops
+    // frames that arrive after later ones were already delivered. History never sees them:
+    // persistence happens in the step, which discarded them.
     const transport = new DelayedReasoningPubSub();
     const replacement = barrier();
     const prompts: unknown[] = [];
@@ -657,6 +660,8 @@ describe.each(['durable', 'evented', 'evented-split', 'evented-json'] as const)(
         await agent.sendSignal({ type: 'user', contents: 'PROCESSOR_REPLACEMENT' }, scope)
       ).accepted;
       await vi.waitFor(() => expect(providerAborted).toBe(true));
+      // Give a replacement started too early time to show up.
+      await new Promise(resolve => setTimeout(resolve, 50));
       expect(prompts).toHaveLength(1);
       held.release();
       await consumption;
