@@ -194,6 +194,7 @@ export class AsyncBufferObservationStrategy extends ObservationStrategy {
     // retried write can mean an earlier attempt landed (and may already be activated), so look
     // for this cycle's chunk on the head before giving up. A chunk that never landed must not
     // be indexed, reported as buffered, or advance buffering.
+    let committedRecord = liveRecord;
     if (appendResult && !appendResult.persisted) {
       const head = appendAttempts > 1 ? await getLineageHead(this.storage, record) : null;
       const landed =
@@ -204,6 +205,7 @@ export class AsyncBufferObservationStrategy extends ObservationStrategy {
         return { status: 'not-committed', reason: 'the buffered chunk was already observed' };
       }
       this.persistedRecordId = head.id;
+      committedRecord = head;
     } else {
       this.persistedRecordId = appendResult?.recordId ?? record.id;
     }
@@ -256,6 +258,8 @@ export class AsyncBufferObservationStrategy extends ObservationStrategy {
         }
       }
     }
+
+    return { status: 'committed', processed, record: committedRecord };
   }
 
   async emitEndMarkers(_cycleId: string, processed: ProcessedObservation) {
