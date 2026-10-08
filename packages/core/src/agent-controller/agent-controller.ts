@@ -410,8 +410,8 @@ export class AgentController<TState = {}> {
     });
     session.om.setResolver({
       getState: () => session.state.get() as Record<string, unknown>,
-      setState: updates => void session.state.set(updates as Partial<TState>),
-      setSetting: ({ key, value }) => session.thread.setSetting({ key, value }),
+      setState: (updates, event) =>
+        session.state.update(() => ({ updates: updates as Partial<TState>, events: [event], result: undefined })),
       omConfig: this.config.omConfig,
       gateways: this.config.gateways ?? [],
     });
@@ -421,8 +421,8 @@ export class AgentController<TState = {}> {
     });
     session.subagents.setResolver({
       getState: () => session.state.get() as Record<string, unknown>,
-      setState: updates => void session.state.set(updates as Partial<TState>),
-      setSetting: ({ key, value }) => session.thread.setSetting({ key, value }),
+      setState: (updates, event) =>
+        session.state.update(() => ({ updates: updates as Partial<TState>, events: [event], result: undefined })),
     });
     session.thread.connect(this.createThreadDataStore(session), session as Session);
     session.setMachinery({

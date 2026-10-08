@@ -2497,8 +2497,7 @@ class SessionOMRole {
   readonly #config: SessionOMRoleConfig;
   readonly #bus: SessionBus;
   #getState: (() => Record<string, unknown>) | undefined;
-  #setState: ((updates: Record<string, unknown>) => void) | undefined;
-  #setSetting: ((args: { key: string; value: unknown }) => Promise<void>) | undefined;
+  #setState: ((updates: Record<string, unknown>, event: AgentControllerEvent) => Promise<void>) | undefined;
   #omConfig: AgentControllerOMConfig | undefined;
   #gateways: MastraModelGatewayInterface[] | undefined;
 
@@ -2510,14 +2509,12 @@ class SessionOMRole {
   /** @internal Injected by {@link SessionOM.setResolver}. */
   setWiring(wiring: {
     getState: () => Record<string, unknown>;
-    setState: (updates: Record<string, unknown>) => void;
-    setSetting: (args: { key: string; value: unknown }) => Promise<void>;
+    setState: (updates: Record<string, unknown>, event: AgentControllerEvent) => Promise<void>;
     omConfig?: AgentControllerOMConfig;
     gateways?: MastraModelGatewayInterface[];
   }): void {
     this.#getState = wiring.getState;
     this.#setState = wiring.setState;
-    this.#setSetting = wiring.setSetting;
     this.#omConfig = wiring.omConfig;
     this.#gateways = wiring.gateways;
   }
@@ -2548,9 +2545,9 @@ class SessionOMRole {
 
   /** Switch this role's model: update session state, persist, and emit. */
   async switchModel({ modelId }: { modelId: string }): Promise<void> {
-    this.#setState?.({ [this.#config.modelIdKey]: modelId });
-    await this.#setSetting?.({ key: this.#config.modelIdKey, value: modelId });
-    this.#bus.emit({ type: 'om_model_changed', role: this.#config.role, modelId });
+    const event: AgentControllerEvent = { type: 'om_model_changed', role: this.#config.role, modelId };
+    if (this.#setState) await this.#setState({ [this.#config.modelIdKey]: modelId }, event);
+    else this.#bus.emit(event);
   }
 }
 
@@ -2595,8 +2592,7 @@ class SessionOM {
    */
   setResolver(options: {
     getState: () => Record<string, unknown>;
-    setState: (updates: Record<string, unknown>) => void;
-    setSetting: (args: { key: string; value: unknown }) => Promise<void>;
+    setState: (updates: Record<string, unknown>, event: AgentControllerEvent) => Promise<void>;
     omConfig?: AgentControllerOMConfig;
     gateways?: MastraModelGatewayInterface[];
   }): void {
@@ -2675,8 +2671,7 @@ function subagentModelKey(agentType?: string): string {
 class SessionSubagentModel {
   readonly #bus: SessionBus;
   #getState: (() => Record<string, unknown>) | undefined;
-  #setState: ((updates: Record<string, unknown>) => void) | undefined;
-  #setSetting: ((args: { key: string; value: unknown }) => Promise<void>) | undefined;
+  #setState: ((updates: Record<string, unknown>, event: AgentControllerEvent) => Promise<void>) | undefined;
 
   constructor(bus: SessionBus) {
     this.#bus = bus;
@@ -2685,12 +2680,10 @@ class SessionSubagentModel {
   /** @internal Injected by {@link SessionSubagents.setResolver}. */
   setWiring(wiring: {
     getState: () => Record<string, unknown>;
-    setState: (updates: Record<string, unknown>) => void;
-    setSetting: (args: { key: string; value: unknown }) => Promise<void>;
+    setState: (updates: Record<string, unknown>, event: AgentControllerEvent) => Promise<void>;
   }): void {
     this.#getState = wiring.getState;
     this.#setState = wiring.setState;
-    this.#setSetting = wiring.setSetting;
   }
 
   /**
@@ -2713,9 +2706,9 @@ class SessionSubagentModel {
    */
   async set({ modelId, agentType }: { modelId: string; agentType?: string }): Promise<void> {
     const key = subagentModelKey(agentType);
-    this.#setState?.({ [key]: modelId });
-    await this.#setSetting?.({ key, value: modelId });
-    this.#bus.emit({ type: 'subagent_model_changed', modelId, scope: 'thread', agentType });
+    const event: AgentControllerEvent = { type: 'subagent_model_changed', modelId, scope: 'thread', agentType };
+    if (this.#setState) await this.#setState({ [key]: modelId }, event);
+    else this.#bus.emit(event);
   }
 }
 
@@ -2739,8 +2732,7 @@ class SessionSubagents {
    */
   setResolver(options: {
     getState: () => Record<string, unknown>;
-    setState: (updates: Record<string, unknown>) => void;
-    setSetting: (args: { key: string; value: unknown }) => Promise<void>;
+    setState: (updates: Record<string, unknown>, event: AgentControllerEvent) => Promise<void>;
   }): void {
     this.model.setWiring(options);
   }
@@ -2849,7 +2841,7 @@ class SessionState<TState = unknown> {
     this.#source.selection = this.getSelection();
   }
 
-  /** Internal run-lifetime handle; callers release it at the run's terminal boundary. */
+  /** Internal source handle. Run-held handles follow runScope reachability; temporary owners may release explicitly. */
   retain(
     input?: {
       resourceId: string;
