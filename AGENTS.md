@@ -1,5 +1,9 @@
 # Repository guidance
 
+For Aeromech Industries fork maintenance, follow [MAINTENANCE.md](MAINTENANCE.md).
+It owns downstream branches, publication and integration bookkeeping. Apply the
+upstream package guidance below when working on the corresponding source.
+
 Unless asked, don't inspect reference or modify examples.
 Use the most-specific `AGENTS.md`; for package work, read `packages/<name>/AGENTS.md` first.
 

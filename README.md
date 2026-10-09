@@ -1,4 +1,20 @@
-# Mastra
+# Mastra — Aeromech Industries
+
+This maintained fork supplies Mastra Code for **TessarAct Code — Aeromech Industries**.
+We keep the upstream project and its history together so improvements can be
+reviewed and brought into TessarAct's native coding experience.
+
+Our integration focuses on `mastracode/tui` and `mastracode/sdk`: terminal
+attachment, branding, server-authorized models and workspace-scoped storage.
+The current TessarAct integration pins `mastracode@0.44.1` and
+`@mastra/code-sdk@1.10.1`; both upstream release tags resolve to
+`b21e46e19b469a25c8896bcee90afd58d6f1a890`. Source patch migration is tracked in
+[TessarAct #534](https://github.com/AeromechIndustries/TessarAct/issues/534).
+
+Use [MAINTENANCE.md](MAINTENANCE.md) for fork ownership, branches, build boundaries
+and the update procedure. The upstream introduction follows.
+
+## Upstream Mastra
 
 [![npm version](https://badge.fury.io/js/@mastra%2Fcore.svg)](https://www.npmjs.com/package/@mastra/core)
 [![CodeQl](https://github.com/mastra-ai/mastra/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/mastra-ai/mastra/actions/workflows/github-code-scanning/codeql)
