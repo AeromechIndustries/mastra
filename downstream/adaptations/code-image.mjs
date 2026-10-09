@@ -24,7 +24,7 @@ export async function buildCodeRuntime(directory) {
   await writeFile(path.join(directory, "credentials-disabled.json"), "{}\n");
   await writeFile(
     path.join(directory, "NOTICE"),
-    "TessarAct Code — Aeromech Industries\nBased on Mastra Code 0.44.1 and @mastra/code-sdk 1.10.1, Apache-2.0.\nUpstream files are modified for terminal transport, application-owned inference, credential boundaries and branding.\nSee MASTRA-CODE-LICENSE and MASTRA-CODE-SDK-LICENSE.\n"
+    "TessarAct Code — Aeromech Industries\nBased on Mastra Code 0.44.1 and @mastra/code-sdk 1.10.1, Apache-2.0.\nUpstream files are modified for terminal transport, application-owned inference, credential boundaries, optional native-library loading and branding.\n@mastra/fastembed 1.3.2 is modified to defer ONNX loading until embedding initialization; its package retains the upstream license notices.\nSee MASTRA-CODE-LICENSE and MASTRA-CODE-SDK-LICENSE.\n"
   );
   await build({
     absWorkingDir: repository,
@@ -105,7 +105,16 @@ export async function adaptStagedCodeRuntime(deployment) {
     ["@mastra/code-sdk", "dist/utils/project.js"],
     ["@mastra/code-sdk", "dist/index.js"],
     ["@mastra/code-sdk", "dist/auth/account-rotation-processor.js"],
+    ["@mastra/fastembed", "dist/index.js"],
   ];
+  const embeddingManifest = JSON.parse(
+    await readFile(
+      path.join(repository, "node_modules/@mastra/fastembed/package.json"),
+      "utf8"
+    )
+  );
+  if (embeddingManifest.version !== "1.3.2")
+    throw new Error("Optional embedding dependency changed.");
   const upstreamTuiFiles = await readdir(
     path.join(repository, "node_modules/mastracode/dist")
   );
@@ -131,6 +140,40 @@ export async function adaptStagedCodeRuntime(deployment) {
     await writeFile(`${file}.tessaract-stage`, result);
     await rename(`${file}.tessaract-stage`, file);
   }
+  // Optional native libraries belong to their feature's initialization, not
+  // module import. The managed LibSQL/OM composition does not enable vectors
+  // or DuckDB tracing; their original APIs still load them when requested.
+  await adapt(
+    "@mastra/fastembed",
+    "dist/index.js",
+    'import * as ort from "onnxruntime-node";',
+    'let ort;\nasync function loadOrt() { return ort ??= await import("onnxruntime-node"); }'
+  );
+  const embeddingFile = path.join(
+    deployment, "node_modules/@mastra/fastembed/dist/index.js"
+  );
+  const embeddingSource = await readFile(embeddingFile, "utf8");
+  const sessionCreation = "const session = await ort.InferenceSession.create(modelPath, {";
+  if (embeddingSource.split(sessionCreation).length !== 3)
+    throw new Error("Optional embedding initialization seams changed.");
+  await writeFile(
+    `${embeddingFile}.tessaract-stage`,
+    embeddingSource.replaceAll(sessionCreation,
+      "await loadOrt();\n\t\t" + sessionCreation)
+  );
+  await rename(`${embeddingFile}.tessaract-stage`, embeddingFile);
+  await adapt(
+    "@mastra/code-sdk",
+    "dist/index.js",
+    'import { DuckDBStore } from "@mastra/duckdb";',
+    '// Local tracing loads DuckDB only when explicitly enabled.'
+  );
+  await adapt(
+    "@mastra/code-sdk",
+    "dist/index.js",
+    "const observabilityDuckDB = new DuckDBStore({",
+    'const { DuckDBStore } = await import("@mastra/duckdb");\n\t\tconst observabilityDuckDB = new DuckDBStore({'
+  );
   await adapt(
     "@mastra/code-sdk",
     "dist/agents/model.js",
