@@ -30,6 +30,42 @@ Preserve existing project-specific integration branches such as TessarAct's
 `dev`. GitHub's organization default-branch setting governs new repositories;
 fork setup also checks the inherited upstream branch name.
 
+### Maintained upstream forks
+
+Apply this convention to every maintained upstream fork used by TessarAct,
+including Mastra, Mobile-TUI and future adopted projects:
+
+- `origin` identifies our Aeromech Industries fork. `origin/master` carries our
+  reviewed downstream changes and is the fork's default maintained branch.
+- `upstream` identifies the original project. Fetch its actual default branch
+  into `upstream/<branch>` and set `upstream/HEAD` to that reference. Preserve
+  upstream's branch name; its `main` and our `master` have distinct owners.
+- Treat `upstream/*` as fetched references. Develop downstream changes on issue
+  branches, then open PRs against our maintained branch.
+- Record the exact upstream release tag and source commit for consumed
+  packages. Tracking upstream's latest branch is separate from upgrading a
+  pinned dependency.
+- Review imports of upstream changes together with our patch set and focused
+  checks. Publish a deliberate integration through our fork's PR workflow.
+
+| Fork | Downstream | Upstream |
+| --- | --- | --- |
+| `AeromechIndustries/mastra` | `origin/master` | `mastra-ai/mastra`, `upstream/main` |
+| `AeromechIndustries/Mobile-TUI` | `origin/master` | `connorads/remobi`, `upstream/main` |
+
+After clone, inspect `git remote -v` and `git branch -r`. Verify the original
+repository and its current default branch before adding a missing `upstream`
+remote. For this Mastra fork, the current setup commands are:
+
+```sh
+git remote add upstream https://github.com/mastra-ai/mastra.git
+git fetch --no-tags upstream main:refs/remotes/upstream/main
+git remote set-head upstream main
+```
+
+Reuse an existing verified remote rather than adding it twice. Resolve release
+tags separately when preparing the source ports or dependency update.
+
 Use noninteractive, explicitly targeted pull-request commands for downstream
 work, such as `gh pr create --repo AeromechIndustries/mastra --base master`.
 Attach each created PR to its Codex task. Choose checks for the changed package
