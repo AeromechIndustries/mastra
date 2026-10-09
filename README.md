@@ -1,15 +1,19 @@
 # Mastra — Aeromech Industries
 
-This maintained fork supplies Mastra Code for **TessarAct Code — Aeromech Industries**.
-We keep the upstream project and its history together so improvements can be
-reviewed and brought into TessarAct's native coding experience.
+This is Aeromech Industries' maintained Mastra fork for **TessarAct**. It brings
+our downstream changes together across the framework, agents, storage,
+workspaces and Mastra Code, alongside the upstream project and its history.
 
-Our integration focuses on `mastracode/tui` and `mastracode/sdk`: terminal
-attachment, branding, server-authorized models and workspace-scoped storage.
-The current TessarAct integration pins `mastracode@0.44.1` and
-`@mastra/code-sdk@1.10.1`; both upstream release tags resolve to
-`b21e46e19b469a25c8896bcee90afd58d6f1a890`. Source patch migration is tracked in
-[TessarAct #534](https://github.com/AeromechIndustries/TessarAct/issues/534).
+Our current patch set covers durable agent execution and recovery, remote
+workspace language services, PostgreSQL background-task serialization, and
+Code's embedding, provider bridge and **TessarAct Code — Aeromech Industries**
+branding. [The downstream inventory](downstream/README.md) records the exact
+patches, package versions and application revisions.
+
+The inventory currently preserves the application-consumed package patches and
+Code image-build recipe. Their source-level ports and fork-built packages are
+the next integration step; TessarAct continues consuming its existing pinned
+packages during that transition.
 
 Use [MAINTENANCE.md](MAINTENANCE.md) for fork ownership, branches, build boundaries
 and the update procedure. The upstream introduction follows.

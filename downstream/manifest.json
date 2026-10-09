@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "AeromechIndustries/TessarAct",
+  "sourceRevision": "aff10b6bb93080d40d8bb4b5fb3fe3ee5c9866b1",
+  "patches": [
+    {
+      "package": "@mastra/code-sdk@1.10.1",
+      "path": "patches/@mastra__code-sdk@1.10.1.patch",
+      "sha256": "5cd8e31610078e0e20216d08cb2b2f9105ebb4b84f271c9d97136c678971603a",
+      "file": "patches/@mastra__code-sdk@1.10.1.patch",
+      "status": "recorded",
+      "upstreamTag": "@mastra/code-sdk@1.10.1",
+      "upstreamCommit": "b21e46e19b469a25c8896bcee90afd58d6f1a890"
+    },
+    {
+      "package": "mastracode@0.44.1",
+      "path": "patches/mastracode@0.44.1.patch",
+      "sha256": "aec62d7e83769929ac148970415256a0dca316391f92de107757a8085af2bf2b",
+      "file": "patches/mastracode@0.44.1.patch",
+      "status": "recorded",
+      "upstreamTag": "mastracode@0.44.1",
+      "upstreamCommit": "b21e46e19b469a25c8896bcee90afd58d6f1a890"
+    },
+    {
+      "package": "@mastra/pg@1.29.0",
+      "path": "patches/@mastra__pg@1.29.0.patch",
+      "sha256": "d503a46c727268be68cbfbec5cc2e2e60caf0eb3a76b6853e64e5c2a43919b3d",
+      "file": "patches/@mastra__pg@1.29.0.patch",
+      "status": "recorded",
+      "upstreamTag": "@mastra/pg@1.29.0",
+      "upstreamCommit": "b21e46e19b469a25c8896bcee90afd58d6f1a890"
+    },
+    {
+      "package": "@mastra/core@1.74.0",
+      "path": "patches/@mastra__core@1.74.0.patch",
+      "sha256": "2842bbe306aab1c4f152861e83c712d5888c7877f6eab470317ae8e475d76637",
+      "file": "patches/@mastra__core@1.74.0.patch",
+      "status": "recorded",
+      "upstreamTag": "@mastra/core@1.74.0",
+      "upstreamCommit": "b21e46e19b469a25c8896bcee90afd58d6f1a890"
+    }
+  ],
+  "adaptations": [
+    {
+      "file": "adaptations/code-image.mjs",
+      "sourcePath": "scripts/build/code-runtime.mjs",
+      "sourceRevision": "bfe45d966a2e91ab1a5502c25f0fac877a4e627f",
+      "sha256": "d461a94151fc033bff7b0add5439ed491739a64a9c6fed729d34656640dea30f",
+      "status": "recorded",
+      "packages": [
+        "@mastra/code-sdk@1.10.1",
+        "mastracode@0.44.1"
+      ]
+    }
+  ],
+  "externalPatches": [
+    {
+      "package": "@ai-sdk/provider-utils@3.0.28",
+      "path": "patches/@ai-sdk__provider-utils@3.0.28.patch",
+      "sha256": "bcbdca63f8ba9c105d9c5f116483790e17af00582781f1e4c4c73517dbed4917",
+      "upstreamRepository": "vercel/ai",
+      "status": "retained-in-application"
+    }
+  ]
+}

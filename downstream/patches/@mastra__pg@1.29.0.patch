@@ -1,0 +1,94 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -5021,8 +5021,7 @@
+ 	return schemaName ? `${schemaName}.${quoted}` : quoted;
+ }
+ function serializeJson(v) {
+-	if (typeof v === "object" && v != null) return toPgJson(v);
+-	return v ?? null;
++	return v === void 0 ? null : JSON.stringify(v);
+ }
+ function parseJson$2(v) {
+ 	if (typeof v === "string") try {
+@@ -5049,9 +5048,9 @@
+ 		threadId: row.thread_id ?? void 0,
+ 		resourceId: row.resource_id ?? void 0,
+ 		runId: row.run_id,
+-		result: parseJson$2(row.result),
++		result: row.result,
+ 		error: parseJson$2(row.error),
+-		suspendPayload: parseJson$2(row.suspend_payload),
++		suspendPayload: row.suspend_payload,
+ 		retryCount: Number(row.retry_count),
+ 		maxRetries: Number(row.max_retries),
+ 		timeoutMs: Number(row.timeout_ms),
+@@ -5221,10 +5220,10 @@
+ 				resource_id: task.resourceId ?? null,
+ 				run_id: task.runId,
+ 				status: task.status,
+-				args: serializeJson(task.args),
+-				result: serializeJson(task.result),
+-				error: serializeJson(task.error),
+-				suspend_payload: serializeJson(task.suspendPayload),
++				args: task.args,
++				result: task.result ?? null,
++				error: task.error ?? null,
++				suspend_payload: task.suspendPayload ?? null,
+ 				retry_count: task.retryCount,
+ 				max_retries: task.maxRetries,
+ 				timeout_ms: task.timeoutMs,
+@@ -24746,4 +24745,4 @@
+ exports.WorkspacesPG = WorkspacesPG;
+ exports.exportSchemas = exportSchemas;
+ 
+-//# sourceMappingURL=index.cjs.map
+\ No newline at end of file
++//# sourceMappingURL=index.cjs.map
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -4997,8 +4997,7 @@
+ 	return schemaName ? `${schemaName}.${quoted}` : quoted;
+ }
+ function serializeJson(v) {
+-	if (typeof v === "object" && v != null) return toPgJson(v);
+-	return v ?? null;
++	return v === void 0 ? null : JSON.stringify(v);
+ }
+ function parseJson$2(v) {
+ 	if (typeof v === "string") try {
+@@ -5025,9 +5024,9 @@
+ 		threadId: row.thread_id ?? void 0,
+ 		resourceId: row.resource_id ?? void 0,
+ 		runId: row.run_id,
+-		result: parseJson$2(row.result),
++		result: row.result,
+ 		error: parseJson$2(row.error),
+-		suspendPayload: parseJson$2(row.suspend_payload),
++		suspendPayload: row.suspend_payload,
+ 		retryCount: Number(row.retry_count),
+ 		maxRetries: Number(row.max_retries),
+ 		timeoutMs: Number(row.timeout_ms),
+@@ -5197,10 +5196,10 @@
+ 				resource_id: task.resourceId ?? null,
+ 				run_id: task.runId,
+ 				status: task.status,
+-				args: serializeJson(task.args),
+-				result: serializeJson(task.result),
+-				error: serializeJson(task.error),
+-				suspend_payload: serializeJson(task.suspendPayload),
++				args: task.args,
++				result: task.result ?? null,
++				error: task.error ?? null,
++				suspend_payload: task.suspendPayload ?? null,
+ 				retry_count: task.retryCount,
+ 				max_retries: task.maxRetries,
+ 				timeout_ms: task.timeoutMs,
+@@ -24692,4 +24691,4 @@
+ //#endregion
+ export { AgentsPG, BackgroundTasksPG, BlobsPG, ChannelsPG, DatasetsPG, ExperimentsPG, FavoritesPG, KnowledgePG, MCPClientsPG, MCPServersPG, MemoryPG, NotificationsPG, ObservabilityPG, ObservabilityStoragePostgresVNext, PGVECTOR_PROMPT, PgFactoryStorage, PgVector, PoolAdapter, PostgresStore, PostgresStoreVNext, PromptBlocksPG, SchedulesPG, ScorerDefinitionsPG, ScoresPG, SkillsPG, ThreadStatePG, ToolProviderConnectionsPG, WorkflowDefinitionsPG, WorkflowsPG, WorkspacesPG, exportSchemas };
+ 
+-//# sourceMappingURL=index.js.map
+\ No newline at end of file
++//# sourceMappingURL=index.js.map
