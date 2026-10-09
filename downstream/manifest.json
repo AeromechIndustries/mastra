@@ -44,12 +44,13 @@
     {
       "file": "adaptations/code-image.mjs",
       "sourcePath": "scripts/build/code-runtime.mjs",
-      "sourceRevision": "bfe45d966a2e91ab1a5502c25f0fac877a4e627f",
-      "sha256": "d461a94151fc033bff7b0add5439ed491739a64a9c6fed729d34656640dea30f",
+      "sourceRevision": "4284c88d0153f0a5bc6d441b0e1809c5ca7a5ca1",
+      "sha256": "2727a6a7dfeb2c33e16744abfc0475e7c4e091218b041cc0be66c5373375dd87",
       "status": "recorded",
       "packages": [
         "@mastra/code-sdk@1.10.1",
-        "mastracode@0.44.1"
+        "mastracode@0.44.1",
+        "@mastra/fastembed@1.3.2"
       ]
     }
   ],
