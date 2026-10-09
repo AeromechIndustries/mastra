@@ -4,12 +4,15 @@ Owner: aeromech-1. Codex executes interactive work for the owner.
 
 ## Purpose
 
-This fork is the maintained source for TessarAct Code's native terminal and
-coding controller. Keep downstream changes focused on the Code packages and
-the framework seams their integration needs.
+This fork is the maintained home for all TessarAct changes to Mastra. Maintain
+framework, agent, storage, workspace and Code patches here, with their upstream
+base, consuming application revision and focused verification recorded in the
+[downstream inventory](downstream/README.md).
 
 | Source | Role |
 | --- | --- |
+| `packages/core` | Durable execution, agent composition and remote workspace language services. |
+| `stores/pg` | PostgreSQL persistence and background-task serialization. |
 | `mastracode/tui` | Native terminal interface and TessarAct branding. |
 | `mastracode/sdk` | Coding controller, model resolution and persistent Code state. |
 | [TessarAct #534](https://github.com/AeromechIndustries/TessarAct/issues/534) | Application integration and native Code acceptance. |
@@ -35,11 +38,19 @@ repository bookkeeping.
 
 ## Source updates and builds
 
-The current application pins `mastracode@0.44.1` and `@mastra/code-sdk@1.10.1`.
-Both release tags resolve to upstream commit
-`b21e46e19b469a25c8896bcee90afd58d6f1a890`. The initial fork preserves upstream
-source; TessarAct's package patches and image-build adaptations remain the
-integration source until their focused source migration is accepted.
+The recorded application patch set pins `@mastra/core@1.74.0`,
+`@mastra/pg@1.29.0`, `@mastra/code-sdk@1.10.1` and `mastracode@0.44.1`.
+All four release tags resolve to upstream commit
+`b21e46e19b469a25c8896bcee90afd58d6f1a890`. The inventory preserves their exact
+compiled-package patches and Code image-build adaptations. TessarAct's existing
+package and image workflow remains the consumer until source ports and rebuilt
+packages pass their integration checks.
+
+Record each new Mastra patch or amendment in the inventory. Keep exact package
+snapshots distinct from applied source commits and published packages. Mark
+source ports accepted only after the corresponding package checks pass. Track
+patches to other upstream projects with their own owner; TessarAct's
+`@ai-sdk/provider-utils` patch belongs to Vercel AI SDK rather than this fork.
 
 For an integration update:
 
@@ -49,8 +60,9 @@ For an integration update:
 3. Build and check the affected packages using the upstream workspace tools.
 4. Record the package versions, source commit, checks and license notices.
 5. Update TessarAct's pinned dependencies through its dependency workflow.
-6. Build the workspace image through the infrastructure build contract and
-   verify the native Code journey before deployment acceptance.
+6. Verify the changed TessarAct journey. For sandbox components, build the
+   workspace image through the infrastructure build contract before deployment
+   acceptance.
 
 Inherited GitHub Actions are disabled during fork preparation. Enable focused
 downstream validation when the package migration introduces its build contract.

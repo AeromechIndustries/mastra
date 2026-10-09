@@ -1,0 +1,1544 @@
+diff --git a/dist/agent/durable/create-evented-agent.d.ts b/dist/agent/durable/create-evented-agent.d.ts
+--- a/dist/agent/durable/create-evented-agent.d.ts
++++ b/dist/agent/durable/create-evented-agent.d.ts
+@@ -36,6 +36,10 @@
+  * Options for createEventedAgent factory function.
+  */
+ export interface CreateEventedAgentOptions<TAgentId extends string = string, TTools extends Record<string, any> = Record<string, any>, TOutput = undefined> {
++    snapshotRequestContext?: import("./durable-agent.js").DurableAgentConfig<TAgentId, TTools, TOutput>['snapshotRequestContext'];
++    rehydrateExecution?: import("./durable-agent.js").DurableAgentConfig<TAgentId, TTools, TOutput>['rehydrateExecution'];
++    /** Cooperative durable execution checkpoint policy. */
++    executionCheckpoint?: import("./workflows/create-durable-agentic-workflow.js").DurableExecutionCheckpoint;
+     /** The Agent to wrap with evented durable execution capabilities */
+     agent: Agent<TAgentId, TTools, TOutput>;
+     /**
+diff --git a/dist/agent/durable/durable-agent.d.ts b/dist/agent/durable/durable-agent.d.ts
+--- a/dist/agent/durable/durable-agent.d.ts
++++ b/dist/agent/durable/durable-agent.d.ts
+@@ -144,6 +144,13 @@
+     untilIdle?: boolean | {
+         maxIdleMs?: number;
+     };
++    /**
++     * Application acknowledgment for native background completion replay.
++     * Checked immediately before automatic continuation. True skips a result
++     * already incorporated into a checkpointed turn. Closure-only; callers must
++     * restore this policy after restart. Errors stop continuation, never fail open.
++     */
++    isBackgroundTaskResultConsumed?: (taskId: string) => boolean | Promise<boolean>;
+     /** When true, the in-loop background task check step skips waiting (streamUntilIdle sets this) */
+     _skipBgTaskWait?: boolean;
+     /**
+@@ -210,6 +217,19 @@
+  * Configuration for DurableAgent - wraps an existing Agent with durable execution
+  */
+ export interface DurableAgentConfig<TAgentId extends string = string, TTools extends ToolsInput = ToolsInput, TOutput = undefined> {
++    /** Explicit persistence projection. Return only serializable references, never credentials or runtime objects. */
++    snapshotRequestContext?: (context: NonNullable<AgentExecutionOptions<TOutput>['requestContext']>) => Record<string, unknown>;
++    /** Reauthorize and rebuild non-serializable call-time execution bindings before recovery or resume. Errors fail closed. */
++    rehydrateExecution?: (input: {
++        runId: string;
++        agentId: string;
++        operation: 'recover' | 'resume';
++        requestContextEntries?: Record<string, unknown>;
++    }) => Promise<AgentExecutionOptions<TOutput> & {
++        requestContext: NonNullable<AgentExecutionOptions<TOutput>['requestContext']>;
++    }>;
++    /** Cooperatively suspend before dispatch; does not cancel already-running tools. */
++    executionCheckpoint?: import("./workflows/create-durable-agentic-workflow.js").DurableExecutionCheckpoint;
+     /**
+      * The Agent to wrap with durable execution capabilities.
+      * All agent methods (getModel, listTools, etc.) delegate to this agent.
+diff --git a/dist/agent/durable/index.cjs b/dist/agent/durable/index.cjs
+--- a/dist/agent/durable/index.cjs
++++ b/dist/agent/durable/index.cjs
+@@ -85,7 +85,8 @@
+ 	* @internal
+ 	*/
+ 	get workflowEngine() {
+-		return "evented";
++		// TessarAct's durable owner dispatches the default engine; PubSub observes its runs.
++		return "default";
+ 	}
+ 	/**
+ 	* EventedAgent owns its snapshot-persistence policy and always persists the
+@@ -189,14 +190,17 @@
+ * ```
+ */
+ function createEventedAgent(options) {
+-	const { agent, pubsub, cache, maxSteps, shouldCache, shouldPersistSnapshot } = options;
++	const { agent, pubsub, cache, maxSteps, shouldCache, shouldPersistSnapshot, executionCheckpoint, snapshotRequestContext, rehydrateExecution } = options;
+ 	return new EventedAgent({
+ 		agent,
+ 		pubsub,
+ 		cache,
+ 		maxSteps,
+ 		shouldCache,
+-		shouldPersistSnapshot
++		shouldPersistSnapshot,
++		executionCheckpoint,
++		snapshotRequestContext,
++		rehydrateExecution
+ 	});
+ }
+ /**
+@@ -337,4 +341,4 @@
+ exports.subscribeToAbortRequests = require_create_durable_agent.subscribeToAbortRequests;
+ exports.toolRequiresApproval = require_create_durable_agent.toolRequiresApproval;
+ 
+-//# sourceMappingURL=index.cjs.map
+\ No newline at end of file
++//# sourceMappingURL=index.cjs.map
+diff --git a/dist/agent/durable/index.js b/dist/agent/durable/index.js
+--- a/dist/agent/durable/index.js
++++ b/dist/agent/durable/index.js
+@@ -84,7 +84,8 @@
+ 	* @internal
+ 	*/
+ 	get workflowEngine() {
+-		return "evented";
++		// TessarAct's durable owner dispatches the default engine; PubSub observes its runs.
++		return "default";
+ 	}
+ 	/**
+ 	* EventedAgent owns its snapshot-persistence policy and always persists the
+@@ -188,14 +189,17 @@
+ * ```
+ */
+ function createEventedAgent(options) {
+-	const { agent, pubsub, cache, maxSteps, shouldCache, shouldPersistSnapshot } = options;
++	const { agent, pubsub, cache, maxSteps, shouldCache, shouldPersistSnapshot, executionCheckpoint, snapshotRequestContext, rehydrateExecution } = options;
+ 	return new EventedAgent({
+ 		agent,
+ 		pubsub,
+ 		cache,
+ 		maxSteps,
+ 		shouldCache,
+-		shouldPersistSnapshot
++		shouldPersistSnapshot,
++		executionCheckpoint,
++		snapshotRequestContext,
++		rehydrateExecution
+ 	});
+ }
+ /**
+@@ -277,4 +281,4 @@
+ //#endregion
+ export { AGENT_CONTROL_TOPIC, AGENT_STREAM_TOPIC, AgentControlEventTypes, AgentStreamEventTypes, DurableAgent, DurableAgentDefaults, DurableStepIds, EventedAgent, ExtendedRunRegistry, RunRegistry, accumulatedUsageSchema, agentThreadStreamRuntime, baseDurableAgenticInputSchema, baseIterationStateSchema, buildStepRecord, calculateAccumulatedUsage, createBaseIterationStateUpdate, createDurableAgent, createDurableAgentStream, createDurableAgenticWorkflow, createDurableBackgroundTaskCheckStep, createDurableLLMExecutionStep, createDurableLLMMappingStep, createDurableToolCallStep, createEventedAgent, createWorkflowInput, durableAgenticOutputSchema, emitChunkEvent, emitErrorEvent, emitFinishEvent, emitStepFinishEvent, emitStepStartEvent, emitSuspendedEvent, ensureRemoteAbortListener, executeDurableAgentScorers, executeDurableToolCalls, globalRunRegistry, isDurableAgent, isEventedAgent, isEventedAgentClass, isLocalDurableAgent, modelConfigSchema, modelListEntrySchema, prepareForDurableExecution, publishAbortRequest, rebuildRunToolsFromMastra, resolveDurableToolCallConcurrency, resolveInternalState, resolveModel, resolveRuntimeDependencies, resolveTool, runDurableFinishSideEffects, runDurableStreamUntilIdle, runResumeDurableStreamUntilIdle, serializeDurableOptions, serializeDurableState, serializeModelConfig, serializeToolsMetadata, subscribeToAbortRequests, toolRequiresApproval };
+ 
+-//# sourceMappingURL=index.js.map
+\ No newline at end of file
++//# sourceMappingURL=index.js.map
+diff --git a/dist/agent/durable/workflows/create-durable-agentic-workflow.d.ts b/dist/agent/durable/workflows/create-durable-agentic-workflow.d.ts
+--- a/dist/agent/durable/workflows/create-durable-agentic-workflow.d.ts
++++ b/dist/agent/durable/workflows/create-durable-agentic-workflow.d.ts
+@@ -1,5 +1,6 @@
+ import type { DurableAgenticWorkflowOptions } from './durable-loop-builder.js';
+ export type { DurableAgenticWorkflowOptions } from './durable-loop-builder.js';
++export type { DurableExecutionCheckpoint } from './durable-loop-builder.js';
+ export { defaultShouldPersistSnapshot } from './durable-loop-builder.js';
+ /**
+  * Composes the durable agentic workflow. The topology, workflow options, and
+@@ -66,4 +67,4 @@
+     };
+     state: any;
+ }, unknown>;
+-//# sourceMappingURL=create-durable-agentic-workflow.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=create-durable-agentic-workflow.d.ts.map
+diff --git a/dist/agent/durable/workflows/durable-loop-builder.d.ts b/dist/agent/durable/workflows/durable-loop-builder.d.ts
+--- a/dist/agent/durable/workflows/durable-loop-builder.d.ts
++++ b/dist/agent/durable/workflows/durable-loop-builder.d.ts
+@@ -14,7 +14,16 @@
+ /**
+  * Options for creating a durable agentic workflow
+  */
++export type DurableExecutionCheckpoint = (context: {
++    runId: string;
++    agentId: string;
++    phase: "model" | "tool" | "continuation" | "evaluation";
++    stepIndex: number;
++    toolCallId?: string;
++    requestContext: import("../../../request-context/index.js").RequestContext;
++}) => Promise<{ pause: true; reason: string } | undefined>;
+ export interface DurableAgenticWorkflowOptions {
++    executionCheckpoint?: DurableExecutionCheckpoint;
+     /** Maximum number of agentic loop iterations */
+     maxSteps?: number;
+     /**
+@@ -435,4 +444,4 @@
+     }, unknown>;
+ }
+ export {};
+-//# sourceMappingURL=durable-loop-builder.d.ts.map
+\ No newline at end of file
++//# sourceMappingURL=durable-loop-builder.d.ts.map
+diff --git a/dist/agent-C-4VraMN.cjs b/dist/agent-C-4VraMN.cjs
+--- a/dist/agent-C-4VraMN.cjs
++++ b/dist/agent-C-4VraMN.cjs
+@@ -4319,6 +4319,9 @@
+ 	*/
+ 	async execute(params) {
+ 		const { workflowId, runId, resourceId, graph, input, initialState, resume, retryConfig, workflowSpan, disableScorers, restart, timeTravel, perStep } = params;
++		// A claimed continuation starts a new persistence epoch. The previous
++		// suspension fence must not suppress checkpoints after a warm resume.
++		if (resume || restart) this.clearLastPersistedStatus(runId);
+ 		const { attempts = 0, delay = 0 } = retryConfig ?? {};
+ 		const steps = graph.steps;
+ 		if (steps.length === 0) {
+@@ -36874,7 +36877,17 @@
+ 		if (isProcessing || closed || runningTaskIds.size > 0 || pendingCompletions.length === 0) return;
+ 		isProcessing = true;
+ 		try {
+-			const batch = pendingCompletions.splice(0, pendingCompletions.length);
++			const queued = pendingCompletions.splice(0, pendingCompletions.length);
++			const batch = [];
++			for (const chunk of queued) {
++				const taskId = chunk.payload?.taskId;
++				// The application may have checkpointed this result during the
++				// preceding foreground turn. Recheck immediately before dispatch,
++				// not at delivery time while that turn is still processing.
++				if (!taskId || !restStreamOptions?.isBackgroundTaskResultConsumed ||
++					!await restStreamOptions.isBackgroundTaskResultConsumed(taskId)) batch.push(chunk);
++			}
++			if (batch.length === 0) return;
+ 			for (const chunk of batch) {
+ 				const tid = chunk.payload?.taskId;
+ 				const ctype = chunk.type;
+@@ -40064,7 +40077,11 @@
+ 	* @internal
+ 	*/
+ 	__fork() {
+-		const fork = new Agent({
++		return this.__forkWithFactory((config) => new Agent(config));
++	}
++	/** Trusted managed hosts compose an upstream agent factory without losing published configuration. */
++	__forkWithFactory(factory) {
++		const fork = factory({
+ 			...this.#config,
+ 			rawConfig: this.toRawConfig()
+ 		});
+diff --git a/dist/agent-CnrRF71P.js b/dist/agent-CnrRF71P.js
+--- a/dist/agent-CnrRF71P.js
++++ b/dist/agent-CnrRF71P.js
+@@ -4317,6 +4317,9 @@
+ 	*/
+ 	async execute(params) {
+ 		const { workflowId, runId, resourceId, graph, input, initialState, resume, retryConfig, workflowSpan, disableScorers, restart, timeTravel, perStep } = params;
++		// A claimed continuation starts a new persistence epoch. The previous
++		// suspension fence must not suppress checkpoints after a warm resume.
++		if (resume || restart) this.clearLastPersistedStatus(runId);
+ 		const { attempts = 0, delay = 0 } = retryConfig ?? {};
+ 		const steps = graph.steps;
+ 		if (steps.length === 0) {
+@@ -36872,7 +36875,17 @@
+ 		if (isProcessing || closed || runningTaskIds.size > 0 || pendingCompletions.length === 0) return;
+ 		isProcessing = true;
+ 		try {
+-			const batch = pendingCompletions.splice(0, pendingCompletions.length);
++			const queued = pendingCompletions.splice(0, pendingCompletions.length);
++			const batch = [];
++			for (const chunk of queued) {
++				const taskId = chunk.payload?.taskId;
++				// The application may have checkpointed this result during the
++				// preceding foreground turn. Recheck immediately before dispatch,
++				// not at delivery time while that turn is still processing.
++				if (!taskId || !restStreamOptions?.isBackgroundTaskResultConsumed ||
++					!await restStreamOptions.isBackgroundTaskResultConsumed(taskId)) batch.push(chunk);
++			}
++			if (batch.length === 0) return;
+ 			for (const chunk of batch) {
+ 				const tid = chunk.payload?.taskId;
+ 				const ctype = chunk.type;
+@@ -40062,7 +40075,11 @@
+ 	* @internal
+ 	*/
+ 	__fork() {
+-		const fork = new Agent({
++		return this.__forkWithFactory((config) => new Agent(config));
++	}
++	/** Trusted managed hosts compose an upstream agent factory without losing published configuration. */
++	__forkWithFactory(factory) {
++		const fork = factory({
+ 			...this.#config,
+ 			rawConfig: this.toRawConfig()
+ 		});
+diff --git a/dist/create-durable-agent-9tNbDxM8.js b/dist/create-durable-agent-9tNbDxM8.js
+--- a/dist/create-durable-agent-9tNbDxM8.js
++++ b/dist/create-durable-agent-9tNbDxM8.js
+@@ -1177,8 +1177,18 @@
+ * path passes. Best-effort: entries that fail a JSON round-trip are skipped
+ * so a single non-serializable value can't break the workflow input.
+ */
+-function snapshotRequestContextEntries(requestContext) {
++function projectDurableRequestContext(requestContext, project) {
++	if (!project) return requestContext;
++	// Workflow snapshots and spans also serialize context, separately from workflow input.
++	// Keep live bindings accessible to tools while applying the same projection at each boundary.
++	return new class extends RequestContext {
++		toJSON() { return JSON.parse(JSON.stringify(project(this))); }
++		serializeForSpan() { return this.toJSON(); }
++	}(requestContext.entries());
++}
++function snapshotRequestContextEntries(requestContext, project) {
+ 	if (!requestContext) return void 0;
++	if (project) return JSON.parse(JSON.stringify(project(requestContext)));
+ 	const out = {};
+ 	let any = false;
+ 	for (const [key, value] of requestContext.entries()) {
+@@ -1235,7 +1245,7 @@
+ 	const typedAgent = agent;
+ 	const runId = providedRunId ?? crypto.randomUUID();
+ 	const messageId = crypto.randomUUID();
+-	const requestContext = providedRequestContext ?? new RequestContext();
++	const requestContext = projectDurableRequestContext(providedRequestContext ?? new RequestContext(), options.snapshotRequestContext);
+ 	if (typedAgent.requestContextSchema) {
+ 		const contextValues = getRequestContextInputValues(requestContext);
+ 		const validation = await typedAgent.requestContextSchema["~standard"].validate(contextValues);
+@@ -1390,7 +1400,7 @@
+ 			});
+ 		} else logger?.warn?.(`[DurableAgent] Error running input processors: ${error}`);
+ 	}
+-	let requestContextEntriesSnapshot = snapshotRequestContextEntries(requestContext);
++	let requestContextEntriesSnapshot = snapshotRequestContextEntries(requestContext, options.snapshotRequestContext);
+ 	if (requestVersions !== void 0) {
+ 		const requestVersionsJson = boundedStringify(requestVersions);
+ 		if (requestVersionsJson !== void 0) requestContextEntriesSnapshot = {
+@@ -4089,7 +4099,7 @@
+ 			if (!tool) tool = findProviderToolByName(registryEntry?.tools, toolName);
+ 			if (!tool) tool = Object.values(registryEntry?.tools ?? {}).find((t) => t && typeof t === "object" && "id" in t && t.id === toolName);
+ 			const needsSaveQueueForFlush = !registryEntry?.saveQueueManager && !!state?.threadId;
+-			if ((!tool || needsSaveQueueForFlush) && mastra) {
++			if ((!tool || needsSaveQueueForFlush) && mastra && !registryEntry?.authorizedToolsOnly) {
+ 				const rebuilt = await rebuildRunToolsFromMastra({
+ 					mastra,
+ 					runId,
+@@ -4111,8 +4121,8 @@
+ 					if (!tool) tool = Object.values(rebuiltTools).find((t) => t && typeof t === "object" && "id" in t && t.id === toolName);
+ 				}
+ 			}
+-			if (!tool) tool = resolveTool(toolName, mastra);
+-			if (!tool && mastra) {
++			if (!tool && !registryEntry?.authorizedToolsOnly) tool = resolveTool(toolName, mastra);
++			if (!tool && mastra && !registryEntry?.authorizedToolsOnly) {
+ 				mastraTools = mastra.listTools?.();
+ 				if (mastraTools) {
+ 					tool = findProviderToolByName(mastraTools, toolName);
+@@ -4152,6 +4162,13 @@
+ 			let messageList;
+ 			const extendedEntry = globalRunRegistry.get(runId);
+ 			if (extendedEntry?.messageList) messageList = extendedEntry.messageList;
++			if (registryEntry?.authorizedToolsOnly && messageList && !messageList.get.all.db().some((msg) => msg.role === "assistant" && (msg.content?.parts ?? []).some((part) => part?.type === "tool-invocation" && part.toolInvocation?.toolCallId === toolCallId))) {
++				// A cold resume prepares an empty process-local MessageList. Restore the
++				// checkpointed model response before recording/clearing approval metadata.
++				const completedModelStep = params.getStepResult(DurableStepIds.LLM_EXECUTION);
++				if (!completedModelStep?.messageListState) throw new Error("Recovered tool call has no checkpointed model response");
++				messageList.deserialize(completedModelStep.messageListState);
++			}
+ 			const doFlush = async () => {
+ 				await flushMessagesBeforeSuspension({
+ 					saveQueueManager,
+@@ -5478,6 +5495,30 @@
+ * resolution via registry + serialized `messageListState`, pubsub chunk
+ * transport, the evented `workflowFactory`, and snapshot policies).
+ */
++function withDurableExecutionCheckpoint(step, phase, checkpoint) {
++	if (!checkpoint) return step;
++	const execute = step.execute;
++	return {
++		...step,
++		execute: async (params) => {
++			const input = params.getInitData();
++			const saved = params.suspendData?.type === "execution-pause" ? params.suspendData.pending : undefined;
++			const pending = saved ?? { resumeData: params.resumeData, suspendData: params.suspendData };
++			const decision = await checkpoint({
++				runId: input.runId,
++				agentId: input.agentId,
++				phase,
++				stepIndex: params.inputData.stepIndex ?? input.iterationCount ?? 0,
++				toolCallId: phase === "tool" ? params.inputData.toolCallId : undefined,
++				requestContext: params.requestContext
++			});
++			if (decision?.pause) return params.suspend({
++				type: "execution-pause", reason: decision.reason, phase, pending
++			});
++			return execute({ ...params, ...pending });
++		}
++	};
++}
+ var DurableAgenticLoopBuilder = class extends AgenticLoopBuilder {
+ 	#options;
+ 	#maxSteps;
+@@ -5558,17 +5599,17 @@
+ 		return emitChunkEvent(runtime.pubsub, runtime.runId, chunk);
+ 	}
+ 	llmExecutionStep() {
+-		return createDurableLLMExecutionStep();
++		return withDurableExecutionCheckpoint(createDurableLLMExecutionStep(), "model", this.#options?.executionCheckpoint);
+ 	}
+ 	/** Each tool call runs as its own step with suspend support. */
+ 	toolCallStep() {
+-		return createDurableToolCallStep();
++		return withDurableExecutionCheckpoint(createDurableToolCallStep(), "tool", this.#options?.executionCheckpoint);
+ 	}
+ 	llmMappingStep() {
+ 		return createDurableLLMMappingStep();
+ 	}
+ 	backgroundTaskCheckStep() {
+-		return createDurableBackgroundTaskCheckStep();
++		return withDurableExecutionCheckpoint(createDurableBackgroundTaskCheckStep(), "continuation", this.#options?.executionCheckpoint);
+ 	}
+ 	/**
+ 	* Mirrors the non-durable `signalDrainStep` which drains signals queued
+@@ -5624,7 +5665,7 @@
+ 	* so it shows up in workflow traces and produces a proper state transition.
+ 	*/
+ 	isTaskCompleteStep() {
+-		return createDurableIsTaskCompleteStep(this.#maxSteps);
++		return withDurableExecutionCheckpoint(createDurableIsTaskCompleteStep(this.#maxSteps), "evaluation", this.#options?.executionCheckpoint);
+ 	}
+ 	/**
+ 	* The goal evaluation step — mirrors the non-durable `createGoalStep`.
+@@ -5632,7 +5673,7 @@
+ 	* already stopped the loop.
+ 	*/
+ 	goalStep() {
+-		return createDurableGoalStep();
++		return withDurableExecutionCheckpoint(createDurableGoalStep(), "evaluation", this.#options?.executionCheckpoint);
+ 	}
+ 	/**
+ 	* The single iteration workflow (LLM -> Tool Calls -> Mapping).
+@@ -6069,6 +6110,9 @@
+ 	#cleanupTimeoutMs;
+ 	/** User-supplied per-topic cache policy (see DurableAgentConfig.shouldCache) */
+ 	#shouldCache;
++	#executionCheckpoint;
++	#snapshotRequestContext;
++	#rehydrateExecution;
+ 	/**
+ 	* User-supplied snapshot-persistence policy
+ 	* (see DurableAgentConfig.shouldPersistSnapshot). Protected so subclasses
+@@ -6099,6 +6143,10 @@
+ 		this.#cleanupTimeoutMs = cleanupTimeoutMs ?? 3e4;
+ 		this.#shouldCache = shouldCache;
+ 		this.userShouldPersistSnapshot = shouldPersistSnapshot;
++		this.#executionCheckpoint = config.executionCheckpoint;
++		this.#snapshotRequestContext = config.snapshotRequestContext;
++		this.#rehydrateExecution = config.rehydrateExecution;
++
+ 	}
+ 	/**
+ 	* Get the resolved cache instance.
+@@ -6403,7 +6451,8 @@
+ 	}
+ 	/** Rebuilds process-local recovery state from the persisted durable workflow input. */
+ 	async #rehydrateRecoveryState({ runId, workflowInput, abortController, recoveryLease }) {
+-		const requestContext = workflowInput.requestContextEntries ? new RequestContext(Object.entries(workflowInput.requestContextEntries)) : new RequestContext();
++		const executionOptions = await this.#resolveRehydratedExecution(runId, "recover", workflowInput.requestContextEntries);
++		const requestContext = executionOptions?.requestContext ?? (workflowInput.requestContextEntries ? new RequestContext(Object.entries(workflowInput.requestContextEntries)) : new RequestContext());
+ 		const messageListMemoryInfo = workflowInput.messageListState?.memoryInfo;
+ 		const threadId = workflowInput.state?.threadId ?? messageListMemoryInfo?.threadId;
+ 		const resourceId = workflowInput.state?.resourceId ?? messageListMemoryInfo?.resourceId;
+@@ -6423,9 +6472,10 @@
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] recover(${runId}) messageList deserialize skipped: ${error}`);
+ 		}
+ 		const wrapped = this.#wrappedAgent;
++		const recoveredExecution = executionOptions ? await this.#rebuildExecutionBindings(runId, threadId, resourceId, executionOptions) : {};
+ 		let model;
+ 		try {
+-			model = await wrapped.getModel({ requestContext });
++			model = recoveredExecution.model ?? await wrapped.getModel({ requestContext });
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] Failed to resolve model during recover(${runId}): ${error}`);
+ 		}
+@@ -6439,6 +6489,7 @@
+ 			if (rebound.unbound > 0) this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] recover(${runId}) model list drifted (persisted ${persistedModelList.length} enabled entries, resolved ${enabledLive.length}); bound ${rebound.boundById} by id, ${rebound.boundByPosition} by position; ${rebound.unbound} will resolve from serialized config`);
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] Failed to resolve model list during recover(${runId}): ${error}`);
++			if (executionOptions) throw error;
+ 		}
+ 		recoveryLease.assertOwned();
+ 		let memory;
+@@ -6446,6 +6497,7 @@
+ 			memory = await wrapped.getMemory({ requestContext });
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] Failed to resolve memory during recover(${runId}): ${error}`);
++			if (executionOptions) throw error;
+ 		}
+ 		recoveryLease.assertOwned();
+ 		const saveQueueManager = memory ? new SaveQueueManager({
+@@ -6465,6 +6517,7 @@
+ 			errorProcessors = await wrapped.listErrorProcessors?.(requestContext) ?? [];
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] recover(${runId}) processor resolution failed: ${error}`);
++			if (executionOptions) throw error;
+ 		}
+ 		recoveryLease.assertOwned();
+ 		const processorStates = /* @__PURE__ */ new Map();
+@@ -6495,6 +6548,7 @@
+ 		}
+ 		recoveryLease.assertOwned();
+ 		const registryEntry = {
++			...recoveredExecution,
+ 			returnScorerData: workflowInput.options?.returnScorerData,
+ 			mastra: this.#mastra,
+ 			model,
+@@ -6528,6 +6582,43 @@
+ 			registryEntry
+ 		};
+ 	}
++	async #resolveRehydratedExecution(runId, operation, requestContextEntries) {
++		if (!this.#rehydrateExecution) return void 0;
++		const options = await this.#rehydrateExecution({
++			runId, agentId: this.id, operation, requestContextEntries
++		});
++		if (!options?.requestContext) throw new Error("Durable execution rehydration requires a freshly authorized request context");
++		return { ...options, requestContext: projectDurableRequestContext(options.requestContext, this.#snapshotRequestContext) };
++	}
++	async #rebuildExecutionBindings(runId, threadId, resourceId, options) {
++		const wrapped = this.#wrappedAgent;
++		const requestContext = options.requestContext;
++		const model = await wrapped.getModel({ requestContext });
++		if (!model) throw new Error("Agent model not available during rehydration");
++		const tools = await wrapped.getToolsForExecution({
++			toolsets: options.toolsets,
++			clientTools: options.clientTools,
++			threadId, resourceId, runId, requestContext,
++			memoryConfig: options.memory?.options,
++			autoResumeSuspendedTools: options.autoResumeSuspendedTools,
++			hooks: options.hooks,
++			delegation: options.delegation,
++			methodType: "stream"
++		});
++		return {
++			tools: options.activeTools ? Object.fromEntries(Object.entries(tools).filter(([name]) => options.activeTools.includes(name))) : tools,
++			authorizedToolsOnly: true,
++			model,
++			requestContext,
++			workspace: await wrapped.getWorkspace({ requestContext }),
++			requireToolApproval: options.requireToolApproval,
++			stopWhen: options.stopWhen,
++			prepareStep: options.prepareStep,
++			isTaskComplete: options.isTaskComplete,
++			goal: wrapped.__getGoalConfig(),
++			callTimeHeaders: extractCallTimeHeaders(options.modelSettings)
++		};
++	}
+ 	/**
+ 	* Ensure pubsub and cache are initialized.
+ 	* Called lazily on first access to allow inheriting cache from Mastra.
+@@ -6817,7 +6908,10 @@
+ 			maxSteps: this.#maxSteps,
+ 			cleanupTimeoutMs: this.#cleanupTimeoutMs,
+ 			shouldCache: this.#shouldCache,
+-			shouldPersistSnapshot: this.userShouldPersistSnapshot
++			shouldPersistSnapshot: this.userShouldPersistSnapshot,
++			executionCheckpoint: this.#executionCheckpoint,
++			snapshotRequestContext: this.#snapshotRequestContext,
++			rehydrateExecution: this.#rehydrateExecution
+ 		});
+ 		if (this.#mastra) fork.#mastra = this.#mastra;
+ 		fork.#innerPubsub = this.#innerPubsub;
+@@ -6948,7 +7042,8 @@
+ 		return createDurableAgenticWorkflow({
+ 			maxSteps: this.#maxSteps,
+ 			engine: this.resolveWorkflowEngine(),
+-			shouldPersistSnapshot: this.resolveShouldPersistSnapshot()
++			shouldPersistSnapshot: this.resolveShouldPersistSnapshot(),
++			executionCheckpoint: this.#executionCheckpoint
+ 		});
+ 	}
+ 	/**
+@@ -7167,6 +7262,7 @@
+ 		});
+ 		const { runId, messageId, workflowInput, registryEntry, messageList, threadId, resourceId } = await prepareForDurableExecution({
+ 			agent: this.#wrappedAgent,
++			snapshotRequestContext: this.#snapshotRequestContext,
+ 			messages,
+ 			options,
+ 			runId: options?.runId,
+@@ -7300,6 +7396,17 @@
+ 	* Resume a suspended workflow execution.
+ 	*/
+ 	async resume(runId, resumeData, options) {
++		let rehydratedOptions;
++		if (this.#rehydrateExecution) {
++			const persisted = await (await this.#mastra?.getStorage()?.getStore("workflows"))?.getWorkflowRunById({
++				runId, workflowName: DurableStepIds.AGENTIC_LOOP
++			});
++			const snapshot = typeof persisted?.snapshot === "string" ? JSON.parse(persisted.snapshot) : persisted?.snapshot;
++			const input = snapshot?.context?.input;
++			if (snapshot?.status !== "suspended" || input?.agentId !== this.id) throw new Error("No suspended execution available");
++			rehydratedOptions = await this.#resolveRehydratedExecution(runId, "resume", input.requestContextEntries);
++			options = { ...options, ...rehydratedOptions };
++		}
+ 		let entry = this.#runRegistry.get(runId);
+ 		if (!entry) {
+ 			const persisted = await (await this.#mastra?.getStorage()?.getStore("workflows"))?.getWorkflowRunById({
+@@ -7377,13 +7484,18 @@
+ 		let resumeRequestContext = entry.requestContext;
+ 		if (options?.requestContext) {
+ 			resumeRequestContext = options.requestContext;
+-			for (const [key, value] of entry.requestContext?.entries() ?? []) if (!resumeRequestContext.has(key)) resumeRequestContext.set(key, value);
++			if (!rehydratedOptions) for (const [key, value] of entry.requestContext?.entries() ?? []) if (!resumeRequestContext.has(key)) resumeRequestContext.set(key, value);
+ 			if (entry.requestContext?.has("MastraMemory")) resumeRequestContext.set("MastraMemory", entry.requestContext.get("MastraMemory"));
+ 			else resumeRequestContext.delete("MastraMemory");
+ 		}
+ 		entry.requestContext = resumeRequestContext;
+ 		const globalEntryForContext = globalRunRegistry.get(runId);
+ 		if (globalEntryForContext) globalEntryForContext.requestContext = resumeRequestContext;
++		if (rehydratedOptions) {
++			const bindings = await this.#rebuildExecutionBindings(runId, memoryInfo?.threadId, memoryInfo?.resourceId, { ...rehydratedOptions, requestContext: resumeRequestContext });
++			Object.assign(entry, bindings);
++			if (globalEntryForContext) Object.assign(globalEntryForContext, bindings);
++		}
+ 		const resolvedOptions = await this.#resolveExecutionOptions({
+ 			...options,
+ 			requestContext: resumeRequestContext,
+@@ -7873,6 +7985,7 @@
+ 		});
+ 		const { runId, messageId, workflowInput, registryEntry, messageList, threadId, resourceId } = await prepareForDurableExecution({
+ 			agent: this.#wrappedAgent,
++			snapshotRequestContext: this.#snapshotRequestContext,
+ 			messages,
+ 			options,
+ 			runId: options?.runId,
+@@ -8488,6 +8601,7 @@
+ 	async prepare(messages, options) {
+ 		const preparation = await prepareForDurableExecution({
+ 			agent: this.#wrappedAgent,
++			snapshotRequestContext: this.#snapshotRequestContext,
+ 			messages,
+ 			options,
+ 			runId: options?.runId,
+@@ -8621,4 +8735,4 @@
+ //#endregion
+ export { prepareForDurableExecution as A, serializeDurableState as B, createDurableAgentStream as C, emitStepFinishEvent as D, emitFinishEvent as E, resolveRuntimeDependencies as F, ensureRemoteAbortListener as G, serializeToolsMetadata as H, resolveTool as I, ExtendedRunRegistry as J, publishAbortRequest as K, toolRequiresApproval as L, rebuildRunToolsFromMastra as M, resolveInternalState as N, emitStepStartEvent as O, resolveModel as P, createWorkflowInput as R, executeDurableAgentScorers as S, emitErrorEvent as T, runDurableStreamUntilIdle as U, serializeModelConfig as V, runResumeDurableStreamUntilIdle as W, getActiveDurableAgentWorkflowExecutions as X, RunRegistry as Y, globalRunRegistry as Z, baseDurableAgenticInputSchema as _, DurableAgent as a, modelConfigSchema as b, createDurableLLMMappingStep as c, createDurableBackgroundTaskCheckStep as d, resolveDurableToolCallConcurrency as f, accumulatedUsageSchema as g, createBaseIterationStateUpdate as h, isLocalDurableAgent as i, runDurableFinishSideEffects as j, emitSuspendedEvent as k, createDurableToolCallStep as l, calculateAccumulatedUsage as m, create_durable_agent_exports as n, createDurableAgenticWorkflow as o, buildStepRecord as p, subscribeToAbortRequests as q, isDurableAgent as r, defaultShouldPersistSnapshot as s, createDurableAgent as t, createDurableLLMExecutionStep as u, baseIterationStateSchema as v, emitChunkEvent as w, modelListEntrySchema as x, durableAgenticOutputSchema as y, serializeDurableOptions as z };
+ 
+-//# sourceMappingURL=create-durable-agent-9tNbDxM8.js.map
+\ No newline at end of file
++//# sourceMappingURL=create-durable-agent-9tNbDxM8.js.map
+diff --git a/dist/create-durable-agent-wYqmG0Bv.cjs b/dist/create-durable-agent-wYqmG0Bv.cjs
+--- a/dist/create-durable-agent-wYqmG0Bv.cjs
++++ b/dist/create-durable-agent-wYqmG0Bv.cjs
+@@ -1177,8 +1177,18 @@
+ * path passes. Best-effort: entries that fail a JSON round-trip are skipped
+ * so a single non-serializable value can't break the workflow input.
+ */
+-function snapshotRequestContextEntries(requestContext) {
++function projectDurableRequestContext(requestContext, project) {
++	if (!project) return requestContext;
++	// Workflow snapshots and spans also serialize context, separately from workflow input.
++	// Keep live bindings accessible to tools while applying the same projection at each boundary.
++	return new class extends require_request_context.RequestContext {
++		toJSON() { return JSON.parse(JSON.stringify(project(this))); }
++		serializeForSpan() { return this.toJSON(); }
++	}(requestContext.entries());
++}
++function snapshotRequestContextEntries(requestContext, project) {
+ 	if (!requestContext) return void 0;
++	if (project) return JSON.parse(JSON.stringify(project(requestContext)));
+ 	const out = {};
+ 	let any = false;
+ 	for (const [key, value] of requestContext.entries()) {
+@@ -1235,7 +1245,7 @@
+ 	const typedAgent = agent;
+ 	const runId = providedRunId ?? crypto.randomUUID();
+ 	const messageId = crypto.randomUUID();
+-	const requestContext = providedRequestContext ?? new require_request_context.RequestContext();
++	const requestContext = projectDurableRequestContext(providedRequestContext ?? new require_request_context.RequestContext(), options.snapshotRequestContext);
+ 	if (typedAgent.requestContextSchema) {
+ 		const contextValues = require_tool.getRequestContextInputValues(requestContext);
+ 		const validation = await typedAgent.requestContextSchema["~standard"].validate(contextValues);
+@@ -1390,7 +1400,7 @@
+ 			});
+ 		} else logger?.warn?.(`[DurableAgent] Error running input processors: ${error}`);
+ 	}
+-	let requestContextEntriesSnapshot = snapshotRequestContextEntries(requestContext);
++	let requestContextEntriesSnapshot = snapshotRequestContextEntries(requestContext, options.snapshotRequestContext);
+ 	if (requestVersions !== void 0) {
+ 		const requestVersionsJson = require_utils_safe_stringify.boundedStringify(requestVersions);
+ 		if (requestVersionsJson !== void 0) requestContextEntriesSnapshot = {
+@@ -4089,7 +4099,7 @@
+ 			if (!tool) tool = require_agent.findProviderToolByName(registryEntry?.tools, toolName);
+ 			if (!tool) tool = Object.values(registryEntry?.tools ?? {}).find((t) => t && typeof t === "object" && "id" in t && t.id === toolName);
+ 			const needsSaveQueueForFlush = !registryEntry?.saveQueueManager && !!state?.threadId;
+-			if ((!tool || needsSaveQueueForFlush) && mastra) {
++			if ((!tool || needsSaveQueueForFlush) && mastra && !registryEntry?.authorizedToolsOnly) {
+ 				const rebuilt = await rebuildRunToolsFromMastra({
+ 					mastra,
+ 					runId,
+@@ -4111,8 +4121,8 @@
+ 					if (!tool) tool = Object.values(rebuiltTools).find((t) => t && typeof t === "object" && "id" in t && t.id === toolName);
+ 				}
+ 			}
+-			if (!tool) tool = resolveTool(toolName, mastra);
+-			if (!tool && mastra) {
++			if (!tool && !registryEntry?.authorizedToolsOnly) tool = resolveTool(toolName, mastra);
++			if (!tool && mastra && !registryEntry?.authorizedToolsOnly) {
+ 				mastraTools = mastra.listTools?.();
+ 				if (mastraTools) {
+ 					tool = require_agent.findProviderToolByName(mastraTools, toolName);
+@@ -4152,6 +4162,13 @@
+ 			let messageList;
+ 			const extendedEntry = globalRunRegistry.get(runId);
+ 			if (extendedEntry?.messageList) messageList = extendedEntry.messageList;
++			if (registryEntry?.authorizedToolsOnly && messageList && !messageList.get.all.db().some((msg) => msg.role === "assistant" && (msg.content?.parts ?? []).some((part) => part?.type === "tool-invocation" && part.toolInvocation?.toolCallId === toolCallId))) {
++				// A cold resume prepares an empty process-local MessageList. Restore the
++				// checkpointed model response before recording/clearing approval metadata.
++				const completedModelStep = params.getStepResult(require_agent.DurableStepIds.LLM_EXECUTION);
++				if (!completedModelStep?.messageListState) throw new Error("Recovered tool call has no checkpointed model response");
++				messageList.deserialize(completedModelStep.messageListState);
++			}
+ 			const doFlush = async () => {
+ 				await flushMessagesBeforeSuspension({
+ 					saveQueueManager,
+@@ -5478,6 +5495,30 @@
+ * resolution via registry + serialized `messageListState`, pubsub chunk
+ * transport, the evented `workflowFactory`, and snapshot policies).
+ */
++function withDurableExecutionCheckpoint(step, phase, checkpoint) {
++	if (!checkpoint) return step;
++	const execute = step.execute;
++	return {
++		...step,
++		execute: async (params) => {
++			const input = params.getInitData();
++			const saved = params.suspendData?.type === "execution-pause" ? params.suspendData.pending : undefined;
++			const pending = saved ?? { resumeData: params.resumeData, suspendData: params.suspendData };
++			const decision = await checkpoint({
++				runId: input.runId,
++				agentId: input.agentId,
++				phase,
++				stepIndex: params.inputData.stepIndex ?? input.iterationCount ?? 0,
++				toolCallId: phase === "tool" ? params.inputData.toolCallId : undefined,
++				requestContext: params.requestContext
++			});
++			if (decision?.pause) return params.suspend({
++				type: "execution-pause", reason: decision.reason, phase, pending
++			});
++			return execute({ ...params, ...pending });
++		}
++	};
++}
+ var DurableAgenticLoopBuilder = class extends require_agent.AgenticLoopBuilder {
+ 	#options;
+ 	#maxSteps;
+@@ -5558,17 +5599,17 @@
+ 		return emitChunkEvent(runtime.pubsub, runtime.runId, chunk);
+ 	}
+ 	llmExecutionStep() {
+-		return createDurableLLMExecutionStep();
++		return withDurableExecutionCheckpoint(createDurableLLMExecutionStep(), "model", this.#options?.executionCheckpoint);
+ 	}
+ 	/** Each tool call runs as its own step with suspend support. */
+ 	toolCallStep() {
+-		return createDurableToolCallStep();
++		return withDurableExecutionCheckpoint(createDurableToolCallStep(), "tool", this.#options?.executionCheckpoint);
+ 	}
+ 	llmMappingStep() {
+ 		return createDurableLLMMappingStep();
+ 	}
+ 	backgroundTaskCheckStep() {
+-		return createDurableBackgroundTaskCheckStep();
++		return withDurableExecutionCheckpoint(createDurableBackgroundTaskCheckStep(), "continuation", this.#options?.executionCheckpoint);
+ 	}
+ 	/**
+ 	* Mirrors the non-durable `signalDrainStep` which drains signals queued
+@@ -5624,7 +5665,7 @@
+ 	* so it shows up in workflow traces and produces a proper state transition.
+ 	*/
+ 	isTaskCompleteStep() {
+-		return createDurableIsTaskCompleteStep(this.#maxSteps);
++		return withDurableExecutionCheckpoint(createDurableIsTaskCompleteStep(this.#maxSteps), "evaluation", this.#options?.executionCheckpoint);
+ 	}
+ 	/**
+ 	* The goal evaluation step — mirrors the non-durable `createGoalStep`.
+@@ -5632,7 +5673,7 @@
+ 	* already stopped the loop.
+ 	*/
+ 	goalStep() {
+-		return createDurableGoalStep();
++		return withDurableExecutionCheckpoint(createDurableGoalStep(), "evaluation", this.#options?.executionCheckpoint);
+ 	}
+ 	/**
+ 	* The single iteration workflow (LLM -> Tool Calls -> Mapping).
+@@ -6069,6 +6110,9 @@
+ 	#cleanupTimeoutMs;
+ 	/** User-supplied per-topic cache policy (see DurableAgentConfig.shouldCache) */
+ 	#shouldCache;
++	#executionCheckpoint;
++	#snapshotRequestContext;
++	#rehydrateExecution;
+ 	/**
+ 	* User-supplied snapshot-persistence policy
+ 	* (see DurableAgentConfig.shouldPersistSnapshot). Protected so subclasses
+@@ -6099,6 +6143,10 @@
+ 		this.#cleanupTimeoutMs = cleanupTimeoutMs ?? 3e4;
+ 		this.#shouldCache = shouldCache;
+ 		this.userShouldPersistSnapshot = shouldPersistSnapshot;
++		this.#executionCheckpoint = config.executionCheckpoint;
++		this.#snapshotRequestContext = config.snapshotRequestContext;
++		this.#rehydrateExecution = config.rehydrateExecution;
++
+ 	}
+ 	/**
+ 	* Get the resolved cache instance.
+@@ -6403,7 +6451,8 @@
+ 	}
+ 	/** Rebuilds process-local recovery state from the persisted durable workflow input. */
+ 	async #rehydrateRecoveryState({ runId, workflowInput, abortController, recoveryLease }) {
+-		const requestContext = workflowInput.requestContextEntries ? new require_request_context.RequestContext(Object.entries(workflowInput.requestContextEntries)) : new require_request_context.RequestContext();
++		const executionOptions = await this.#resolveRehydratedExecution(runId, "recover", workflowInput.requestContextEntries);
++		const requestContext = executionOptions?.requestContext ?? (workflowInput.requestContextEntries ? new require_request_context.RequestContext(Object.entries(workflowInput.requestContextEntries)) : new require_request_context.RequestContext());
+ 		const messageListMemoryInfo = workflowInput.messageListState?.memoryInfo;
+ 		const threadId = workflowInput.state?.threadId ?? messageListMemoryInfo?.threadId;
+ 		const resourceId = workflowInput.state?.resourceId ?? messageListMemoryInfo?.resourceId;
+@@ -6423,9 +6472,10 @@
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] recover(${runId}) messageList deserialize skipped: ${error}`);
+ 		}
+ 		const wrapped = this.#wrappedAgent;
++		const recoveredExecution = executionOptions ? await this.#rebuildExecutionBindings(runId, threadId, resourceId, executionOptions) : {};
+ 		let model;
+ 		try {
+-			model = await wrapped.getModel({ requestContext });
++			model = recoveredExecution.model ?? await wrapped.getModel({ requestContext });
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] Failed to resolve model during recover(${runId}): ${error}`);
+ 		}
+@@ -6439,6 +6489,7 @@
+ 			if (rebound.unbound > 0) this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] recover(${runId}) model list drifted (persisted ${persistedModelList.length} enabled entries, resolved ${enabledLive.length}); bound ${rebound.boundById} by id, ${rebound.boundByPosition} by position; ${rebound.unbound} will resolve from serialized config`);
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] Failed to resolve model list during recover(${runId}): ${error}`);
++			if (executionOptions) throw error;
+ 		}
+ 		recoveryLease.assertOwned();
+ 		let memory;
+@@ -6446,6 +6497,7 @@
+ 			memory = await wrapped.getMemory({ requestContext });
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] Failed to resolve memory during recover(${runId}): ${error}`);
++			if (executionOptions) throw error;
+ 		}
+ 		recoveryLease.assertOwned();
+ 		const saveQueueManager = memory ? new require_agent.SaveQueueManager({
+@@ -6465,6 +6517,7 @@
+ 			errorProcessors = await wrapped.listErrorProcessors?.(requestContext) ?? [];
+ 		} catch (error) {
+ 			this.#mastra?.getLogger?.()?.warn?.(`[DurableAgent] recover(${runId}) processor resolution failed: ${error}`);
++			if (executionOptions) throw error;
+ 		}
+ 		recoveryLease.assertOwned();
+ 		const processorStates = /* @__PURE__ */ new Map();
+@@ -6495,6 +6548,7 @@
+ 		}
+ 		recoveryLease.assertOwned();
+ 		const registryEntry = {
++			...recoveredExecution,
+ 			returnScorerData: workflowInput.options?.returnScorerData,
+ 			mastra: this.#mastra,
+ 			model,
+@@ -6528,6 +6582,43 @@
+ 			registryEntry
+ 		};
+ 	}
++	async #resolveRehydratedExecution(runId, operation, requestContextEntries) {
++		if (!this.#rehydrateExecution) return void 0;
++		const options = await this.#rehydrateExecution({
++			runId, agentId: this.id, operation, requestContextEntries
++		});
++		if (!options?.requestContext) throw new Error("Durable execution rehydration requires a freshly authorized request context");
++		return { ...options, requestContext: projectDurableRequestContext(options.requestContext, this.#snapshotRequestContext) };
++	}
++	async #rebuildExecutionBindings(runId, threadId, resourceId, options) {
++		const wrapped = this.#wrappedAgent;
++		const requestContext = options.requestContext;
++		const model = await wrapped.getModel({ requestContext });
++		if (!model) throw new Error("Agent model not available during rehydration");
++		const tools = await wrapped.getToolsForExecution({
++			toolsets: options.toolsets,
++			clientTools: options.clientTools,
++			threadId, resourceId, runId, requestContext,
++			memoryConfig: options.memory?.options,
++			autoResumeSuspendedTools: options.autoResumeSuspendedTools,
++			hooks: options.hooks,
++			delegation: options.delegation,
++			methodType: "stream"
++		});
++		return {
++			tools: options.activeTools ? Object.fromEntries(Object.entries(tools).filter(([name]) => options.activeTools.includes(name))) : tools,
++			authorizedToolsOnly: true,
++			model,
++			requestContext,
++			workspace: await wrapped.getWorkspace({ requestContext }),
++			requireToolApproval: options.requireToolApproval,
++			stopWhen: options.stopWhen,
++			prepareStep: options.prepareStep,
++			isTaskComplete: options.isTaskComplete,
++			goal: wrapped.__getGoalConfig(),
++			callTimeHeaders: extractCallTimeHeaders(options.modelSettings)
++		};
++	}
+ 	/**
+ 	* Ensure pubsub and cache are initialized.
+ 	* Called lazily on first access to allow inheriting cache from Mastra.
+@@ -6817,7 +6908,10 @@
+ 			maxSteps: this.#maxSteps,
+ 			cleanupTimeoutMs: this.#cleanupTimeoutMs,
+ 			shouldCache: this.#shouldCache,
+-			shouldPersistSnapshot: this.userShouldPersistSnapshot
++			shouldPersistSnapshot: this.userShouldPersistSnapshot,
++			executionCheckpoint: this.#executionCheckpoint,
++			snapshotRequestContext: this.#snapshotRequestContext,
++			rehydrateExecution: this.#rehydrateExecution
+ 		});
+ 		if (this.#mastra) fork.#mastra = this.#mastra;
+ 		fork.#innerPubsub = this.#innerPubsub;
+@@ -6948,7 +7042,8 @@
+ 		return createDurableAgenticWorkflow({
+ 			maxSteps: this.#maxSteps,
+ 			engine: this.resolveWorkflowEngine(),
+-			shouldPersistSnapshot: this.resolveShouldPersistSnapshot()
++			shouldPersistSnapshot: this.resolveShouldPersistSnapshot(),
++			executionCheckpoint: this.#executionCheckpoint
+ 		});
+ 	}
+ 	/**
+@@ -7167,6 +7262,7 @@
+ 		});
+ 		const { runId, messageId, workflowInput, registryEntry, messageList, threadId, resourceId } = await prepareForDurableExecution({
+ 			agent: this.#wrappedAgent,
++			snapshotRequestContext: this.#snapshotRequestContext,
+ 			messages,
+ 			options,
+ 			runId: options?.runId,
+@@ -7300,6 +7396,17 @@
+ 	* Resume a suspended workflow execution.
+ 	*/
+ 	async resume(runId, resumeData, options) {
++		let rehydratedOptions;
++		if (this.#rehydrateExecution) {
++			const persisted = await (await this.#mastra?.getStorage()?.getStore("workflows"))?.getWorkflowRunById({
++				runId, workflowName: DurableStepIds.AGENTIC_LOOP
++			});
++			const snapshot = typeof persisted?.snapshot === "string" ? JSON.parse(persisted.snapshot) : persisted?.snapshot;
++			const input = snapshot?.context?.input;
++			if (snapshot?.status !== "suspended" || input?.agentId !== this.id) throw new Error("No suspended execution available");
++			rehydratedOptions = await this.#resolveRehydratedExecution(runId, "resume", input.requestContextEntries);
++			options = { ...options, ...rehydratedOptions };
++		}
+ 		let entry = this.#runRegistry.get(runId);
+ 		if (!entry) {
+ 			const persisted = await (await this.#mastra?.getStorage()?.getStore("workflows"))?.getWorkflowRunById({
+@@ -7377,13 +7484,18 @@
+ 		let resumeRequestContext = entry.requestContext;
+ 		if (options?.requestContext) {
+ 			resumeRequestContext = options.requestContext;
+-			for (const [key, value] of entry.requestContext?.entries() ?? []) if (!resumeRequestContext.has(key)) resumeRequestContext.set(key, value);
++			if (!rehydratedOptions) for (const [key, value] of entry.requestContext?.entries() ?? []) if (!resumeRequestContext.has(key)) resumeRequestContext.set(key, value);
+ 			if (entry.requestContext?.has("MastraMemory")) resumeRequestContext.set("MastraMemory", entry.requestContext.get("MastraMemory"));
+ 			else resumeRequestContext.delete("MastraMemory");
+ 		}
+ 		entry.requestContext = resumeRequestContext;
+ 		const globalEntryForContext = globalRunRegistry.get(runId);
+ 		if (globalEntryForContext) globalEntryForContext.requestContext = resumeRequestContext;
++		if (rehydratedOptions) {
++			const bindings = await this.#rebuildExecutionBindings(runId, memoryInfo?.threadId, memoryInfo?.resourceId, { ...rehydratedOptions, requestContext: resumeRequestContext });
++			Object.assign(entry, bindings);
++			if (globalEntryForContext) Object.assign(globalEntryForContext, bindings);
++		}
+ 		const resolvedOptions = await this.#resolveExecutionOptions({
+ 			...options,
+ 			requestContext: resumeRequestContext,
+@@ -7873,6 +7985,7 @@
+ 		});
+ 		const { runId, messageId, workflowInput, registryEntry, messageList, threadId, resourceId } = await prepareForDurableExecution({
+ 			agent: this.#wrappedAgent,
++			snapshotRequestContext: this.#snapshotRequestContext,
+ 			messages,
+ 			options,
+ 			runId: options?.runId,
+@@ -8488,6 +8601,7 @@
+ 	async prepare(messages, options) {
+ 		const preparation = await prepareForDurableExecution({
+ 			agent: this.#wrappedAgent,
++			snapshotRequestContext: this.#snapshotRequestContext,
+ 			messages,
+ 			options,
+ 			runId: options?.runId,
+@@ -8926,4 +9040,4 @@
+ 	}
+ });
+ 
+-//# sourceMappingURL=create-durable-agent-wYqmG0Bv.cjs.map
+\ No newline at end of file
++//# sourceMappingURL=create-durable-agent-wYqmG0Bv.cjs.map
+diff --git a/dist/workspace/lsp/client.d.ts b/dist/workspace/lsp/client.d.ts
+--- a/dist/workspace/lsp/client.d.ts
++++ b/dist/workspace/lsp/client.d.ts
+@@ -10,6 +10,56 @@
+  */
+ import type { SandboxProcessManager } from '../sandbox/process-manager/index.js';
+ import type { LSPServerDef } from './types.js';
++export interface LSPPosition {
++    line: number;
++    character: number;
++}
++export interface LSPRange {
++    start: LSPPosition;
++    end: LSPPosition;
++}
++export interface LSPLocation {
++    uri: string;
++    range: LSPRange;
++}
++export interface LSPLocationLink {
++    targetUri: string;
++    targetRange: LSPRange;
++    targetSelectionRange: LSPRange;
++    originSelectionRange?: LSPRange;
++}
++export interface LSPDocumentSymbol {
++    name: string;
++    kind: number;
++    range: LSPRange;
++    selectionRange: LSPRange;
++    detail?: string;
++    children?: LSPDocumentSymbol[];
++}
++export interface LSPWorkspaceSymbol {
++    name: string;
++    kind: number;
++    location: LSPLocation | { uri: string; };
++    containerName?: string;
++}
++export interface LSPCallHierarchyItem {
++    name: string;
++    kind: number;
++    uri: string;
++    range: LSPRange;
++    selectionRange: LSPRange;
++    detail?: string;
++    data?: unknown;
++}
++export interface LSPIncomingCall {
++    from: LSPCallHierarchyItem;
++    fromRanges: LSPRange[];
++}
++export interface LSPOutgoingCall {
++    to: LSPCallHierarchyItem;
++    fromRanges: LSPRange[];
++}
++export type LSPOperation = 'hover' | 'definition' | 'typeDefinition' | 'implementation' | 'references' | 'documentSymbols' | 'workspaceSymbols' | 'callHierarchy';
+ /**
+  * Check if vscode-jsonrpc is available without importing it.
+  * Synchronous check — safe to call at registration time.
+@@ -52,6 +102,9 @@
+     get isAlive(): boolean;
+     /** Name of the LSP server. */
+     get serverName(): string;
++    /** Capabilities returned during initialization. */
++    get capabilities(): Readonly<Record<string, unknown>>;
++    supports(operation: LSPOperation): boolean;
+     /**
+      * Initialize the LSP connection — spawns the server and performs the handshake.
+      */
+@@ -93,24 +146,21 @@
+     /**
+      * Query definition(s) at a position.
+      */
+-    queryDefinition(uri: string, position: {
+-        line: number;
+-        character: number;
+-    }, timeoutMs?: number): Promise<any[]>;
++    queryDefinition(uri: string, position: LSPPosition, timeoutMs?: number): Promise<Array<LSPLocation | LSPLocationLink>>;
+     /**
+      * Query type definition(s) at a position.
+      */
+-    queryTypeDefinition(uri: string, position: {
+-        line: number;
+-        character: number;
+-    }, timeoutMs?: number): Promise<any[]>;
++    queryTypeDefinition(uri: string, position: LSPPosition, timeoutMs?: number): Promise<Array<LSPLocation | LSPLocationLink>>;
+     /**
+      * Query implementation(s) at a position.
+      */
+-    queryImplementation(uri: string, position: {
+-        line: number;
+-        character: number;
+-    }, timeoutMs?: number): Promise<any[]>;
++    queryImplementation(uri: string, position: LSPPosition, timeoutMs?: number): Promise<Array<LSPLocation | LSPLocationLink>>;
++    queryReferences(uri: string, position: LSPPosition, includeDeclaration?: boolean, timeoutMs?: number): Promise<LSPLocation[]>;
++    queryDocumentSymbols(uri: string, timeoutMs?: number): Promise<Array<LSPDocumentSymbol | LSPWorkspaceSymbol>>;
++    queryWorkspaceSymbols(query: string, timeoutMs?: number): Promise<LSPWorkspaceSymbol[]>;
++    queryCallHierarchyPrepare(uri: string, position: LSPPosition, timeoutMs?: number): Promise<LSPCallHierarchyItem[]>;
++    queryIncomingCalls(item: LSPCallHierarchyItem, timeoutMs?: number): Promise<LSPIncomingCall[]>;
++    queryOutgoingCalls(item: LSPCallHierarchyItem, timeoutMs?: number): Promise<LSPOutgoingCall[]>;
+     /**
+      * Shutdown the connection and kill the process.
+      */
+diff --git a/dist/workspace/lsp/manager.d.ts b/dist/workspace/lsp/manager.d.ts
+--- a/dist/workspace/lsp/manager.d.ts
++++ b/dist/workspace/lsp/manager.d.ts
+@@ -30,6 +30,9 @@
+     private filesystem?;
+     constructor(processManager: SandboxProcessManager, root: string, config?: LSPConfig, filesystem?: {
+         exists(path: string): Promise<boolean>;
++        readFile?(path: string, options?: {
++            encoding?: string;
++        }): Promise<string | Uint8Array>;
+     });
+     /** Default project root (fallback when per-file walkup finds nothing). */
+     get root(): string;
+diff --git a/dist/workspace-BPg61u04.js b/dist/workspace-BPg61u04.js
+--- a/dist/workspace-BPg61u04.js
++++ b/dist/workspace-BPg61u04.js
+@@ -1465,6 +1465,7 @@
+ 	diagnostics = /* @__PURE__ */ new Map();
+ 	initializationOptions = null;
+ 	supportsPullDiagnostics = false;
++	serverCapabilities = {};
+ 	constructor(serverDef, workspaceRoot, processManager) {
+ 		this.serverDef = serverDef;
+ 		this.workspaceRoot = workspaceRoot;
+@@ -1478,6 +1479,23 @@
+ 	get serverName() {
+ 		return this.serverDef.name;
+ 	}
++	/** Capabilities returned by this server, retained for explicit unsupported results. */
++	get capabilities() {
++		return this.serverCapabilities;
++	}
++	supports(operation) {
++		const key = {
++			hover: "hoverProvider",
++			definition: "definitionProvider",
++			typeDefinition: "typeDefinitionProvider",
++			implementation: "implementationProvider",
++			references: "referencesProvider",
++			documentSymbols: "documentSymbolProvider",
++			workspaceSymbols: "workspaceSymbolProvider",
++			callHierarchy: "callHierarchyProvider"
++		}[operation];
++		return key ? Boolean(this.serverCapabilities[key]) : false;
++	}
+ 	/**
+ 	* Initialize the LSP connection — spawns the server and performs the handshake.
+ 	*/
+@@ -1508,7 +1526,7 @@
+ 			}],
+ 			capabilities: {
+ 				window: { workDoneProgress: true },
+-				workspace: { configuration: true },
++				workspace: { configuration: true, symbol: { dynamicRegistration: false } },
+ 				textDocument: {
+ 					publishDiagnostics: {
+ 						relatedInformation: true,
+@@ -1546,6 +1564,7 @@
+ 						linkSupport: true
+ 					},
+ 					references: { dynamicRegistration: false },
++					callHierarchy: { dynamicRegistration: false },
+ 					documentHighlight: { dynamicRegistration: false },
+ 					documentSymbol: {
+ 						dynamicRegistration: false,
+@@ -1580,9 +1599,11 @@
+ 		this.connection.onRequest("window/workDoneProgress/create", () => null);
+ 		this.connection.onRequest("client/registerCapability", () => null);
+ 		let initTimer;
+-		if ((await Promise.race([this.connection.sendRequest("initialize", initParams), new Promise((_, reject) => {
++		const initializeResult = await Promise.race([this.connection.sendRequest("initialize", initParams), new Promise((_, reject) => {
+ 			initTimer = setTimeout(() => reject(/* @__PURE__ */ new Error("LSP initialize request timed out")), initTimeout);
+-		})]).finally(() => clearTimeout(initTimer)))?.capabilities?.diagnosticProvider) this.supportsPullDiagnostics = true;
++		})]).finally(() => clearTimeout(initTimer));
++		this.serverCapabilities = initializeResult?.capabilities ?? {};
++		this.supportsPullDiagnostics = Boolean(this.serverCapabilities.diagnosticProvider);
+ 		this.connection.sendNotification("initialized", {});
+ 		this.connection.sendNotification("workspace/didChangeConfiguration", { settings: this.initializationOptions ?? {} });
+ 	}
+@@ -1708,6 +1729,45 @@
+ 		if (!result) return [];
+ 		return Array.isArray(result) ? result : result.uri ? [result] : [];
+ 	}
++	/** Query all references, retaining precise source ranges. */
++	async queryReferences(uri, position, includeDeclaration = true, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("textDocument/references", {
++			textDocument: { uri },
++			position,
++			context: { includeDeclaration }
++		}), timeoutMs, "References request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryDocumentSymbols(uri, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("textDocument/documentSymbol", {
++			textDocument: { uri }
++		}), timeoutMs, "Document symbols request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryWorkspaceSymbols(query, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("workspace/symbol", { query }), timeoutMs, "Workspace symbols request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryCallHierarchyPrepare(uri, position, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("textDocument/prepareCallHierarchy", {
++			textDocument: { uri }, position
++		}), timeoutMs, "Call hierarchy preparation timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryIncomingCalls(item, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("callHierarchy/incomingCalls", { item }), timeoutMs, "Incoming calls request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryOutgoingCalls(item, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("callHierarchy/outgoingCalls", { item }), timeoutMs, "Outgoing calls request timed out");
++		return Array.isArray(result) ? result : [];
++	}
+ 	/**
+ 	* Shutdown the connection and kill the process.
+ 	*/
+@@ -2321,36 +2381,49 @@
+ 	* Returns null when no LSP client is available.
+ 	*/
+ 	async prepareQuery(filePath) {
+-		const lease = await this.acquireClientLease((onAcquired) => this.getClientInternal(filePath, onAcquired));
+-		if (!lease) return null;
+-		const { client, release } = lease;
+-		const languageId = getLanguageId(filePath, this.customExtensions);
+-		if (!languageId) {
+-			release();
+-			return null;
+-		}
++		const unlock = await this.acquireFileLock(filePath);
++		let lease;
+ 		try {
+-			const fs = await import("fs/promises");
+-			let content = "";
+-			try {
+-				content = await fs.readFile(filePath, "utf-8");
+-			} catch {
+-				content = "";
++			lease = await this.acquireClientLease((onAcquired) => this.getClientInternal(filePath, onAcquired));
++			if (!lease) {
++				unlock();
++				return null;
++			}
++			const { client } = lease;
++			const languageId = getLanguageId(filePath, this.customExtensions);
++			if (!languageId) {
++				lease.release();
++				unlock();
++				return null;
+ 			}
+-			client.notifyOpen(filePath, content, languageId);
+ 			const { pathToFileURL } = await import("url");
++			const remoteContent = this.filesystem?.readFile ? await this.filesystem.readFile(filePath, { encoding: "utf-8" }) : await (await import("fs/promises")).readFile(filePath, "utf-8");
++			const content = typeof remoteContent === "string" ? remoteContent : remoteContent.toString("utf-8");
++			client.notifyOpen(filePath, content, languageId);
++			let released = false;
+ 			return {
+ 				client,
+ 				uri: pathToFileURL(filePath).toString(),
+ 				languageId,
+ 				serverName: client.serverName,
+-				release
++				release: () => {
++					if (released) return;
++					released = true;
++					try {
++						client.notifyClose(filePath);
++					} finally {
++						lease.release();
++						unlock();
++					}
++				}
+ 			};
+ 		} catch (error) {
+-			release();
++			lease?.release();
++			unlock();
+ 			throw error;
+ 		}
+ 	}
++
+ 	/**
+ 	* Convenience method: open file, send content, wait for diagnostics, return normalized results.
+ 	* Returns null when no LSP client is available; otherwise returns diagnostics
+@@ -9794,9 +9867,11 @@
+ * Get a single line preview from a file at the specified line number.
+ * Returns the trimmed line content, or null if the line cannot be read.
+ */
+-async function getLinePreview(filePath, lineNumber) {
++async function getLinePreview(filePath, lineNumber, filesystem) {
+ 	try {
+-		return (await fs$1.readFile(filePath, "utf-8")).split("\n")[lineNumber - 1]?.trim() ?? null;
++		const content = filesystem ? await filesystem.readFile(filePath, { encoding: "utf-8" }) : await fs$1.readFile(filePath, "utf-8");
++		const text = typeof content === "string" ? content : content.toString("utf-8");
++		return text.split("\n")[lineNumber - 1]?.trim() ?? null;
+ 	} catch {
+ 		return null;
+ 	}
+@@ -9888,7 +9963,8 @@
+ 		const absolutePath = getAbsolutePath(filePath, lspManager.root, workspace.filesystem?.resolveAbsolutePath?.bind(workspace.filesystem));
+ 		let fileContent = "";
+ 		try {
+-			fileContent = await fs$1.readFile(absolutePath, "utf-8");
++			const content = workspace.filesystem ? await workspace.filesystem.readFile(absolutePath, { encoding: "utf-8" }) : await fs$1.readFile(absolutePath, "utf-8");
++			fileContent = typeof content === "string" ? content : content.toString("utf-8");
+ 		} catch {
+ 			fileContent = "";
+ 		}
+@@ -9968,7 +10044,7 @@
+ 				} : null;
+ 			}).filter((loc) => Boolean(loc)).filter((loc) => !(loc.path === absolutePath && loc.line === line));
+ 			if (definitionLocations.length > 0) {
+-				const previews = await Promise.all(definitionLocations.map((loc) => getLinePreview(loc.path, loc.line)));
++				const previews = await Promise.all(definitionLocations.map((loc) => getLinePreview(loc.path, loc.line, workspace.filesystem)));
+ 				result.definition = definitionLocations.map((loc, i) => ({
+ 					location: `${compressPath(loc.path)}:L${loc.line}:C${loc.character}`,
+ 					preview: previews[i]
+@@ -9990,7 +10066,6 @@
+ 		} catch (err) {
+ 			result.error = `LSP query failed: ${err instanceof Error ? err.message : String(err)}`;
+ 		} finally {
+-			client.notifyClose(absolutePath);
+ 			release();
+ 		}
+ 		span.end({ success: !result.error });
+diff --git a/dist/agent/agent.d.ts b/dist/agent/agent.d.ts
+--- a/dist/agent/agent.d.ts
++++ b/dist/agent/agent.d.ts
+@@ -974,6 +974,8 @@
+      * @internal
+      */
+     __fork(): Agent<TAgentId, TTools, TOutput, TRequestContext>;
++    /** Trusted managed composition preserves published configuration and runtime registration. */
++    __forkWithFactory<TFork extends Agent>(factory: (config: AgentConfig<TAgentId, TTools, TOutput, TRequestContext, TEditor>) => TFork): TFork;
+     /**
+      * Mark this agent as a stored-version fork so execution does not attempt
+      * to resolve a version override for it again.
+diff --git a/dist/workspace-CEKuFfTs.cjs b/dist/workspace-CEKuFfTs.cjs
+--- a/dist/workspace-CEKuFfTs.cjs
++++ b/dist/workspace-CEKuFfTs.cjs
+@@ -1469,6 +1469,7 @@
+ 	diagnostics = /* @__PURE__ */ new Map();
+ 	initializationOptions = null;
+ 	supportsPullDiagnostics = false;
++	serverCapabilities = {};
+ 	constructor(serverDef, workspaceRoot, processManager) {
+ 		this.serverDef = serverDef;
+ 		this.workspaceRoot = workspaceRoot;
+@@ -1482,6 +1483,23 @@
+ 	get serverName() {
+ 		return this.serverDef.name;
+ 	}
++	/** Capabilities returned by this server, retained for explicit unsupported results. */
++	get capabilities() {
++		return this.serverCapabilities;
++	}
++	supports(operation) {
++		const key = {
++			hover: "hoverProvider",
++			definition: "definitionProvider",
++			typeDefinition: "typeDefinitionProvider",
++			implementation: "implementationProvider",
++			references: "referencesProvider",
++			documentSymbols: "documentSymbolProvider",
++			workspaceSymbols: "workspaceSymbolProvider",
++			callHierarchy: "callHierarchyProvider"
++		}[operation];
++		return key ? Boolean(this.serverCapabilities[key]) : false;
++	}
+ 	/**
+ 	* Initialize the LSP connection — spawns the server and performs the handshake.
+ 	*/
+@@ -1512,7 +1530,7 @@
+ 			}],
+ 			capabilities: {
+ 				window: { workDoneProgress: true },
+-				workspace: { configuration: true },
++				workspace: { configuration: true, symbol: { dynamicRegistration: false } },
+ 				textDocument: {
+ 					publishDiagnostics: {
+ 						relatedInformation: true,
+@@ -1550,6 +1568,7 @@
+ 						linkSupport: true
+ 					},
+ 					references: { dynamicRegistration: false },
++					callHierarchy: { dynamicRegistration: false },
+ 					documentHighlight: { dynamicRegistration: false },
+ 					documentSymbol: {
+ 						dynamicRegistration: false,
+@@ -1584,9 +1603,11 @@
+ 		this.connection.onRequest("window/workDoneProgress/create", () => null);
+ 		this.connection.onRequest("client/registerCapability", () => null);
+ 		let initTimer;
+-		if ((await Promise.race([this.connection.sendRequest("initialize", initParams), new Promise((_, reject) => {
++		const initializeResult = await Promise.race([this.connection.sendRequest("initialize", initParams), new Promise((_, reject) => {
+ 			initTimer = setTimeout(() => reject(/* @__PURE__ */ new Error("LSP initialize request timed out")), initTimeout);
+-		})]).finally(() => clearTimeout(initTimer)))?.capabilities?.diagnosticProvider) this.supportsPullDiagnostics = true;
++		})]).finally(() => clearTimeout(initTimer));
++		this.serverCapabilities = initializeResult?.capabilities ?? {};
++		this.supportsPullDiagnostics = Boolean(this.serverCapabilities.diagnosticProvider);
+ 		this.connection.sendNotification("initialized", {});
+ 		this.connection.sendNotification("workspace/didChangeConfiguration", { settings: this.initializationOptions ?? {} });
+ 	}
+@@ -1712,6 +1733,45 @@
+ 		if (!result) return [];
+ 		return Array.isArray(result) ? result : result.uri ? [result] : [];
+ 	}
++	/** Query all references, retaining precise source ranges. */
++	async queryReferences(uri, position, includeDeclaration = true, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("textDocument/references", {
++			textDocument: { uri },
++			position,
++			context: { includeDeclaration }
++		}), timeoutMs, "References request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryDocumentSymbols(uri, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("textDocument/documentSymbol", {
++			textDocument: { uri }
++		}), timeoutMs, "Document symbols request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryWorkspaceSymbols(query, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("workspace/symbol", { query }), timeoutMs, "Workspace symbols request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryCallHierarchyPrepare(uri, position, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("textDocument/prepareCallHierarchy", {
++			textDocument: { uri }, position
++		}), timeoutMs, "Call hierarchy preparation timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryIncomingCalls(item, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("callHierarchy/incomingCalls", { item }), timeoutMs, "Incoming calls request timed out");
++		return Array.isArray(result) ? result : [];
++	}
++	async queryOutgoingCalls(item, timeoutMs = 5e3) {
++		if (!this.connection) return [];
++		const result = await withTimeout(this.connection.sendRequest("callHierarchy/outgoingCalls", { item }), timeoutMs, "Outgoing calls request timed out");
++		return Array.isArray(result) ? result : [];
++	}
+ 	/**
+ 	* Shutdown the connection and kill the process.
+ 	*/
+@@ -2325,36 +2385,49 @@
+ 	* Returns null when no LSP client is available.
+ 	*/
+ 	async prepareQuery(filePath) {
+-		const lease = await this.acquireClientLease((onAcquired) => this.getClientInternal(filePath, onAcquired));
+-		if (!lease) return null;
+-		const { client, release } = lease;
+-		const languageId = getLanguageId(filePath, this.customExtensions);
+-		if (!languageId) {
+-			release();
+-			return null;
+-		}
++		const unlock = await this.acquireFileLock(filePath);
++		let lease;
+ 		try {
+-			const fs = await import("fs/promises");
+-			let content = "";
+-			try {
+-				content = await fs.readFile(filePath, "utf-8");
+-			} catch {
+-				content = "";
++			lease = await this.acquireClientLease((onAcquired) => this.getClientInternal(filePath, onAcquired));
++			if (!lease) {
++				unlock();
++				return null;
++			}
++			const { client } = lease;
++			const languageId = getLanguageId(filePath, this.customExtensions);
++			if (!languageId) {
++				lease.release();
++				unlock();
++				return null;
+ 			}
+-			client.notifyOpen(filePath, content, languageId);
+ 			const { pathToFileURL } = await import("url");
++			const remoteContent = this.filesystem?.readFile ? await this.filesystem.readFile(filePath, { encoding: "utf-8" }) : await (await import("fs/promises")).readFile(filePath, "utf-8");
++			const content = typeof remoteContent === "string" ? remoteContent : remoteContent.toString("utf-8");
++			client.notifyOpen(filePath, content, languageId);
++			let released = false;
+ 			return {
+ 				client,
+ 				uri: pathToFileURL(filePath).toString(),
+ 				languageId,
+ 				serverName: client.serverName,
+-				release
++				release: () => {
++					if (released) return;
++					released = true;
++					try {
++						client.notifyClose(filePath);
++					} finally {
++						lease.release();
++						unlock();
++					}
++				}
+ 			};
+ 		} catch (error) {
+-			release();
++			lease?.release();
++			unlock();
+ 			throw error;
+ 		}
+ 	}
++
+ 	/**
+ 	* Convenience method: open file, send content, wait for diagnostics, return normalized results.
+ 	* Returns null when no LSP client is available; otherwise returns diagnostics
+@@ -9798,9 +9871,11 @@
+ * Get a single line preview from a file at the specified line number.
+ * Returns the trimmed line content, or null if the line cannot be read.
+ */
+-async function getLinePreview(filePath, lineNumber) {
++async function getLinePreview(filePath, lineNumber, filesystem) {
+ 	try {
+-		return (await fs_promises.default.readFile(filePath, "utf-8")).split("\n")[lineNumber - 1]?.trim() ?? null;
++		const content = filesystem ? await filesystem.readFile(filePath, { encoding: "utf-8" }) : await fs_promises.default.readFile(filePath, "utf-8");
++		const text = typeof content === "string" ? content : content.toString("utf-8");
++		return text.split("\n")[lineNumber - 1]?.trim() ?? null;
+ 	} catch {
+ 		return null;
+ 	}
+@@ -9892,7 +9967,8 @@
+ 		const absolutePath = getAbsolutePath(filePath, lspManager.root, workspace.filesystem?.resolveAbsolutePath?.bind(workspace.filesystem));
+ 		let fileContent = "";
+ 		try {
+-			fileContent = await fs_promises.default.readFile(absolutePath, "utf-8");
++			const content = workspace.filesystem ? await workspace.filesystem.readFile(absolutePath, { encoding: "utf-8" }) : await fs_promises.default.readFile(absolutePath, "utf-8");
++			fileContent = typeof content === "string" ? content : content.toString("utf-8");
+ 		} catch {
+ 			fileContent = "";
+ 		}
+@@ -9972,7 +10048,7 @@
+ 				} : null;
+ 			}).filter((loc) => Boolean(loc)).filter((loc) => !(loc.path === absolutePath && loc.line === line));
+ 			if (definitionLocations.length > 0) {
+-				const previews = await Promise.all(definitionLocations.map((loc) => getLinePreview(loc.path, loc.line)));
++				const previews = await Promise.all(definitionLocations.map((loc) => getLinePreview(loc.path, loc.line, workspace.filesystem)));
+ 				result.definition = definitionLocations.map((loc, i) => ({
+ 					location: `${compressPath(loc.path)}:L${loc.line}:C${loc.character}`,
+ 					preview: previews[i]
+@@ -9994,7 +10070,6 @@
+ 		} catch (err) {
+ 			result.error = `LSP query failed: ${err instanceof Error ? err.message : String(err)}`;
+ 		} finally {
+-			client.notifyClose(absolutePath);
+ 			release();
+ 		}
+ 		span.end({ success: !result.error });

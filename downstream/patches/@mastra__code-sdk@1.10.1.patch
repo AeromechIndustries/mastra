@@ -1,0 +1,15 @@
+diff --git a/dist/agents/prompts/index.js b/dist/agents/prompts/index.js
+--- a/dist/agents/prompts/index.js
++++ b/dist/agents/prompts/index.js
+@@ -35,0 +35,5 @@
++	if (ctx.managed) return [
++		{ id: "base-prompt", label: "Base system prompt", content: buildBasePrompt({ ...ctx, projectPath: ctx.workingDir, projectName: ctx.projectName, date: ctx.currentDate, mode: ctx.modeId, toolGuidance: ctx.managed.toolGuidance }) },
++		{ id: "mode-prompt", label: "Managed mode prompt", content: ctx.managed.modePrompt },
++		{ id: "host-instructions", label: "Host instructions", content: ctx.hostInstructions ?? "" }
++	].filter(section => Boolean(section.content));
+diff --git a/dist/agents/prompts/index.d.ts b/dist/agents/prompts/index.d.ts
+--- a/dist/agents/prompts/index.d.ts
++++ b/dist/agents/prompts/index.d.ts
+@@ -14,0 +14,2 @@
++    /** Managed hosts supply authorized tool and mode guidance without local settings, environment or instruction discovery. */
++    managed?: { toolGuidance: string; modePrompt: string };

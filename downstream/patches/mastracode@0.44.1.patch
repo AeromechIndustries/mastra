@@ -1,0 +1,310 @@
+diff --git a/dist/tui-D2uNETXK.js b/dist/tui-D2uNETXK.js
+--- a/dist/tui-D2uNETXK.js
++++ b/dist/tui-D2uNETXK.js
+@@ -22342,7 +22342,7 @@
+ 		plan,
+ 		approvedAt: (/* @__PURE__ */ new Date()).toISOString()
+ 	} });
+-	if (planPath) await approvePlanFile({
++	if (planPath && !state.options.managedHost) await approvePlanFile({
+ 		planPath,
+ 		title,
+ 		resourceId: state.session.identity.getResourceId()
+@@ -22368,7 +22368,7 @@
+ 	const { state } = ctx;
+ 	const projectPath = state.session.state.get()?.projectPath;
+ 	const planPath = submittedPath ? resolvePlanPath(projectPath ?? process.cwd(), submittedPath) : void 0;
+-	const current = planPath ? await readPlanFile(planPath) : void 0;
++	const current = state.options.managedHost ? await state.options.managedHost.readPlanFile?.(submittedPath) : planPath ? await readPlanFile(planPath) : void 0;
+ 	if (!current) state.previousPlanSnapshot = void 0;
+ 	const plan = current?.plan ?? `⚠️ Could not read the plan file at \`${submittedPath}\`. Make sure it exists before submitting it.`;
+ 	const resolvedTitle = current?.title || "Implementation Plan";
+@@ -22405,6 +22405,7 @@
+ 				await resumed;
+ 			},
+ 			onGoal: async () => {
++				if (state.options.managedHost) { showInfo(state, "Start goals through TessarAct durable controls."); return; }
+ 				releaseApprovalFocus();
+ 				firePermissionResult("approved");
+ 				await prepareApprovedPlan(ctx, resolvedTitle, plan, planPath);
+@@ -22431,8 +22432,7 @@
+ 							}
+ 						});
+ 					} finally {
+-						state.planRejectionAbort = true;
+-						state.session.abort();
++						if (!state.options.managedHost) { state.planRejectionAbort = true; state.session.abort(); }
+ 					}
+ 				})();
+ 				resolve();
+@@ -24711,7 +24711,7 @@
+ 		pendingSlashCommands: [],
+ 		pendingSlashCommandMessageIds: [],
+ 		pendingApprovalDismiss: null,
+-		projectInfo: detectProject(process.cwd()),
++		projectInfo: options.managedHost ? options.managedHost.projectInfo : detectProject(process.cwd()),
+ 		modelAuthStatus: { hasAuth: true },
+ 		githubPrPollingActive: false,
+ 		decodeMessageId: void 0,
+@@ -24735,6 +24735,7 @@
+ 		const color = result.session.mode.resolve()?.metadata?.color;
+ 		return typeof color === "string" ? color : void 0;
+ 	};
++	if (!options.managedHost) {
+ 	const voiceSettings = loadSettings().voice;
+ 	result.voiceController = new VoiceController({
+ 		authStorage: result.authStorage,
+@@ -24747,6 +24748,7 @@
+ 	});
+ 	editor.voiceInput = result.voiceController;
+ 	if (voiceSettings.enabled) result.voiceController.restoreEnabled();
++	}
+ 	return result;
+ }
+ //#endregion
+@@ -26174,6 +26176,10 @@
+ 	return null;
+ }
+ function setupAutocomplete(state) {
++	if (state.options.managedHost) {
++		if (state.options.managedHost.autocompleteProvider) state.editor.setAutocompleteProvider(state.options.managedHost.autocompleteProvider);
++		return;
++	}
+ 	const slashCommands = [
+ 		{
+ 			name: "new",
+@@ -26859,6 +26865,11 @@
+ * Streams stdout/stderr in real-time using a bordered box that rebuilds on each chunk.
+ */
+ async function handleShellPassthrough(state, command) {
++	if (state.options.managedHost) {
++		try { showInfo(state, await state.options.managedHost.submitShell(command)); }
++		catch (error) { showError(state, error instanceof Error ? error.message : "Managed shell request failed"); }
++		return;
++	}
+ 	if (!command) {
+ 		showInfo(state, "Usage: !<command> (e.g., !ls -la)");
+ 		return;
+@@ -26973,6 +26984,7 @@
+ 	pendingUserInputResolve;
+ 	static DOUBLE_CTRL_C_MS = 500;
+ 	constructor(options) {
++		if (options.managedHost && !options.terminal) throw new Error("Managed embedding requires an injected terminal.");
+ 		this.state = createTUIState(options);
+ 		options.githubSignals?.onSubscriptionsChanged((event) => {
+ 			const currentThreadId = this.state.session?.thread?.getId?.();
+@@ -27002,7 +27014,7 @@
+ 			updateStatusLine(this.state);
+ 			flushRender(this.state);
+ 		});
+-		const savedSettings = loadSettings$1();
++		const savedSettings = options.managedHost ? { preferences: { quietMode: false, quietModeMaxToolPreviewLines: 2 } } : loadSettings$1();
+ 		this.state.quietMode = savedSettings.preferences.quietMode;
+ 		this.state.quietModeMaxToolPreviewLines = savedSettings.preferences.quietModeMaxToolPreviewLines;
+ 		const originalHandleInput = this.state.editor.handleInput.bind(this.state.editor);
+@@ -27341,6 +27353,19 @@
+ 	}
+ 	async init() {
+ 		if (this.state.isInitialized) return;
++		if (this.state.options.managedHost) {
++			setupAutocomplete(this.state);
++			buildLayout(this.state, () => this.refreshModelAuthStatus());
++			this.cleanupKeyHandlers = setupKeyHandlers(this.state, { stop: () => this.stop(), exit: (code) => this.exit(code), doubleCtrlCMs: MastraTUI.DOUBLE_CTRL_C_MS });
++			this.state.ui.start();
++			subscribeToAgentController(this.state, (event) => this.handleEvent(event));
++			await syncInitialThreadState(this.state);
++			this.state.isInitialized = true;
++			await this.renderExistingMessagesAndSeedIdleCounter();
++			await renderExistingTasks(this.state);
++			this.state.options.managedHost.onReady?.();
++			return;
++		}
+ 		await this.state.controller.init();
+ 		await this.state.controller.getMastra()?.startWorkers();
+ 		if (this.state.pluginManager && !this.cleanupPluginReloadListener) this.cleanupPluginReloadListener = this.state.pluginManager.onReload((plugins) => this.refreshPluginRuntimeState(plugins).catch((err) => {
+@@ -27551,6 +27576,7 @@
+ 		}).catch(() => {});
+ 	}
+ 	startCaffeinate() {
++		if (this.state.options.managedHost) return;
+ 		if (!shouldUseCaffeinate() || this.caffeinateProcess) return;
+ 		try {
+ 			const child = spawn("caffeinate", CAFFEINATE_ARGS, { stdio: "ignore" });
+@@ -27791,6 +27817,11 @@
+ 		};
+ 	}
+ 	async handleSlashCommand(input) {
++		if (this.state.options.managedHost) {
++			try { showInfo(this.state, await this.state.options.managedHost.dispatchSlashCommand(input)); }
++			catch (error) { showError(this.state, error instanceof Error ? error.message : "Managed command failed"); }
++			return true;
++		}
+ 		return dispatchSlashCommand(input, this.state, () => this.buildCommandContext());
+ 	}
+ 	async performLogin(providerId) {
+diff --git a/dist/tui-CvVJXUzA.cjs b/dist/tui-CvVJXUzA.cjs
+--- a/dist/tui-CvVJXUzA.cjs
++++ b/dist/tui-CvVJXUzA.cjs
+@@ -22373,7 +22373,7 @@
+ 		plan,
+ 		approvedAt: (/* @__PURE__ */ new Date()).toISOString()
+ 	} });
+-	if (planPath) await (0, _mastra_code_sdk_utils_plans.approvePlanFile)({
++	if (planPath && !state.options.managedHost) await (0, _mastra_code_sdk_utils_plans.approvePlanFile)({
+ 		planPath,
+ 		title,
+ 		resourceId: state.session.identity.getResourceId()
+@@ -22399,7 +22399,7 @@
+ 	const { state } = ctx;
+ 	const projectPath = state.session.state.get()?.projectPath;
+ 	const planPath = submittedPath ? (0, _mastra_code_sdk_utils_plans.resolvePlanPath)(projectPath ?? process.cwd(), submittedPath) : void 0;
+-	const current = planPath ? await (0, _mastra_code_sdk_utils_plans.readPlanFile)(planPath) : void 0;
++	const current = state.options.managedHost ? await state.options.managedHost.readPlanFile?.(submittedPath) : planPath ? await (0, _mastra_code_sdk_utils_plans.readPlanFile)(planPath) : void 0;
+ 	if (!current) state.previousPlanSnapshot = void 0;
+ 	const plan = current?.plan ?? `⚠️ Could not read the plan file at \`${submittedPath}\`. Make sure it exists before submitting it.`;
+ 	const resolvedTitle = current?.title || "Implementation Plan";
+@@ -22436,6 +22436,7 @@
+ 				await resumed;
+ 			},
+ 			onGoal: async () => {
++				if (state.options.managedHost) { showInfo(state, "Start goals through TessarAct durable controls."); return; }
+ 				releaseApprovalFocus();
+ 				firePermissionResult("approved");
+ 				await prepareApprovedPlan(ctx, resolvedTitle, plan, planPath);
+@@ -22462,8 +22463,7 @@
+ 							}
+ 						});
+ 					} finally {
+-						state.planRejectionAbort = true;
+-						state.session.abort();
++						if (!state.options.managedHost) { state.planRejectionAbort = true; state.session.abort(); }
+ 					}
+ 				})();
+ 				resolve();
+@@ -24742,7 +24742,7 @@
+ 		pendingSlashCommands: [],
+ 		pendingSlashCommandMessageIds: [],
+ 		pendingApprovalDismiss: null,
+-		projectInfo: (0, _mastra_code_sdk_utils_project.detectProject)(process.cwd()),
++		projectInfo: options.managedHost ? options.managedHost.projectInfo : (0, _mastra_code_sdk_utils_project.detectProject)(process.cwd()),
+ 		modelAuthStatus: { hasAuth: true },
+ 		githubPrPollingActive: false,
+ 		decodeMessageId: void 0,
+@@ -24766,6 +24766,7 @@
+ 		const color = result.session.mode.resolve()?.metadata?.color;
+ 		return typeof color === "string" ? color : void 0;
+ 	};
++	if (!options.managedHost) {
+ 	const voiceSettings = (0, _mastra_code_sdk_onboarding_settings.loadSettings)().voice;
+ 	result.voiceController = new VoiceController({
+ 		authStorage: result.authStorage,
+@@ -24778,6 +24779,7 @@
+ 	});
+ 	editor.voiceInput = result.voiceController;
+ 	if (voiceSettings.enabled) result.voiceController.restoreEnabled();
++	}
+ 	return result;
+ }
+ //#endregion
+@@ -26205,6 +26207,10 @@
+ 	return null;
+ }
+ function setupAutocomplete(state) {
++	if (state.options.managedHost) {
++		if (state.options.managedHost.autocompleteProvider) state.editor.setAutocompleteProvider(state.options.managedHost.autocompleteProvider);
++		return;
++	}
+ 	const slashCommands = [
+ 		{
+ 			name: "new",
+@@ -26890,6 +26896,11 @@
+ * Streams stdout/stderr in real-time using a bordered box that rebuilds on each chunk.
+ */
+ async function handleShellPassthrough(state, command) {
++	if (state.options.managedHost) {
++		try { showInfo(state, await state.options.managedHost.submitShell(command)); }
++		catch (error) { showError(state, error instanceof Error ? error.message : "Managed shell request failed"); }
++		return;
++	}
+ 	if (!command) {
+ 		showInfo(state, "Usage: !<command> (e.g., !ls -la)");
+ 		return;
+@@ -27004,6 +27015,7 @@
+ 	pendingUserInputResolve;
+ 	static DOUBLE_CTRL_C_MS = 500;
+ 	constructor(options) {
++		if (options.managedHost && !options.terminal) throw new Error("Managed embedding requires an injected terminal.");
+ 		this.state = createTUIState(options);
+ 		options.githubSignals?.onSubscriptionsChanged((event) => {
+ 			const currentThreadId = this.state.session?.thread?.getId?.();
+@@ -27033,7 +27045,7 @@
+ 			updateStatusLine(this.state);
+ 			flushRender(this.state);
+ 		});
+-		const savedSettings = (0, _mastra_code_sdk_onboarding_index.loadSettings)();
++		const savedSettings = options.managedHost ? { preferences: { quietMode: false, quietModeMaxToolPreviewLines: 2 } } : (0, _mastra_code_sdk_onboarding_index.loadSettings)();
+ 		this.state.quietMode = savedSettings.preferences.quietMode;
+ 		this.state.quietModeMaxToolPreviewLines = savedSettings.preferences.quietModeMaxToolPreviewLines;
+ 		const originalHandleInput = this.state.editor.handleInput.bind(this.state.editor);
+@@ -27372,6 +27384,19 @@
+ 	}
+ 	async init() {
+ 		if (this.state.isInitialized) return;
++		if (this.state.options.managedHost) {
++			setupAutocomplete(this.state);
++			buildLayout(this.state, () => this.refreshModelAuthStatus());
++			this.cleanupKeyHandlers = setupKeyHandlers(this.state, { stop: () => this.stop(), exit: (code) => this.exit(code), doubleCtrlCMs: MastraTUI.DOUBLE_CTRL_C_MS });
++			this.state.ui.start();
++			subscribeToAgentController(this.state, (event) => this.handleEvent(event));
++			await syncInitialThreadState(this.state);
++			this.state.isInitialized = true;
++			await this.renderExistingMessagesAndSeedIdleCounter();
++			await renderExistingTasks(this.state);
++			this.state.options.managedHost.onReady?.();
++			return;
++		}
+ 		await this.state.controller.init();
+ 		await this.state.controller.getMastra()?.startWorkers();
+ 		if (this.state.pluginManager && !this.cleanupPluginReloadListener) this.cleanupPluginReloadListener = this.state.pluginManager.onReload((plugins) => this.refreshPluginRuntimeState(plugins).catch((err) => {
+@@ -27582,6 +27607,7 @@
+ 		}).catch(() => {});
+ 	}
+ 	startCaffeinate() {
++		if (this.state.options.managedHost) return;
+ 		if (!shouldUseCaffeinate() || this.caffeinateProcess) return;
+ 		try {
+ 			const child = (0, child_process.spawn)("caffeinate", CAFFEINATE_ARGS, { stdio: "ignore" });
+@@ -27822,6 +27848,11 @@
+ 		};
+ 	}
+ 	async handleSlashCommand(input) {
++		if (this.state.options.managedHost) {
++			try { showInfo(this.state, await this.state.options.managedHost.dispatchSlashCommand(input)); }
++			catch (error) { showError(this.state, error instanceof Error ? error.message : "Managed command failed"); }
++			return true;
++		}
+ 		return dispatchSlashCommand(input, this.state, () => this.buildCommandContext());
+ 	}
+ 	async performLogin(providerId) {
+diff --git a/dist/tui/state.d.ts b/dist/tui/state.d.ts
+--- a/dist/tui/state.d.ts
++++ b/dist/tui/state.d.ts
+@@ -64,7 +64,18 @@
+     lastNotificationPriority?: string;
+ }
+ export declare function getGithubPrSubscriptionsFromMetadata(metadata: Record<string, unknown> | undefined): GithubPrSubscriptionBadge[];
++/** Host-owned execution; the TUI renders a projection and dispatches authorized intent. */
++export interface MastraManagedHost {
++    projectInfo: ProjectInfo;
++    autocompleteProvider?: Parameters<CustomEditor['setAutocompleteProvider']>[0];
++    dispatchSlashCommand(input: string): Promise<string>;
++    submitShell(command: string): Promise<string>;
++    onReady?(): void;
++    readPlanFile?(path: string): Promise<{ title: string; plan: string } | undefined>;
++}
+ export interface MastraTUIOptions {
++    /** Managed embedding bypasses standalone discovery, workers, auth and maintenance. */
++    managedHost?: MastraManagedHost;
+     /** The controller instance */
+     controller: AgentController<any>;
+     /** The session created from the controller that all work runs through */
