@@ -22,8 +22,11 @@ The four package snapshots were exported byte-for-byte from TessarAct revision
 to `b21e46e19b469a25c8896bcee90afd58d6f1a890`.
 
 The Code recipe is an exact snapshot from revision
-`bfe45d966a2e91ab1a5502c25f0fac877a4e627f`. It depends on TessarAct entrypoints and
+`e5f71086cc44463383d956c36e4b31427e0f3a4f`. It depends on TessarAct entrypoints and
 its staged package layout; run the application-owned build workflow for it.
+The checked prompt and thinking seams feed published mode guidance and intensity
+efforts into native Code controls while retaining conversation overrides. This
+configuration slice is tracked in [TessarAct #610](https://github.com/AeromechIndustries/TessarAct/issues/610).
 The package patch retains older managed-renderer hooks. Porting reviews which
 hooks the native Code path still needs rather than activating a second agent
 owner.
