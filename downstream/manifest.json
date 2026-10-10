@@ -44,8 +44,8 @@
     {
       "file": "adaptations/code-image.mjs",
       "sourcePath": "scripts/build/code-runtime.mjs",
-      "sourceRevision": "4284c88d0153f0a5bc6d441b0e1809c5ca7a5ca1",
-      "sha256": "2727a6a7dfeb2c33e16744abfc0475e7c4e091218b041cc0be66c5373375dd87",
+      "sourceRevision": "e5f71086cc44463383d956c36e4b31427e0f3a4f",
+      "sha256": "e73ae0dfe8d538a66dedc7dc1efbcf95031379662ca63352e13d9219a9804086",
       "status": "recorded",
       "packages": [
         "@mastra/code-sdk@1.10.1",

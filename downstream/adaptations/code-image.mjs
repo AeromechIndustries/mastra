@@ -101,9 +101,11 @@ export async function buildCodeRuntime(directory) {
 export async function adaptStagedCodeRuntime(deployment) {
   // Re-stage only these pinned upstream files so adaptation is repeatable.
   const upstreamFiles = [
+    ["@mastra/code-sdk", "dist/onboarding/settings.js"],
     ["@mastra/code-sdk", "dist/agents/model.js"],
     ["@mastra/code-sdk", "dist/utils/project.js"],
     ["@mastra/code-sdk", "dist/index.js"],
+    ["@mastra/code-sdk", "dist/agents/prompts/index.js"],
     ["@mastra/code-sdk", "dist/auth/account-rotation-processor.js"],
     ["@mastra/fastembed", "dist/index.js"],
   ];
@@ -140,6 +142,12 @@ export async function adaptStagedCodeRuntime(deployment) {
     await writeFile(`${file}.tessaract-stage`, result);
     await rename(`${file}.tessaract-stage`, file);
   }
+  await adapt(
+    "@mastra/code-sdk",
+    "dist/onboarding/settings.js",
+    "function resolveDefaultThinkingLevel(settings, mode) {",
+    "function resolveDefaultThinkingLevel(settings, mode) {\n\tconst managedPack = globalThis.tessaractCodePackThinking?.(settings, mode);\n\tif (managedPack) return managedPack;"
+  );
   // Optional native libraries belong to their feature's initialization, not
   // module import. The managed LibSQL/OM composition does not enable vectors
   // or DuckDB tracing; their original APIs still load them when requested.
@@ -150,29 +158,39 @@ export async function adaptStagedCodeRuntime(deployment) {
     'let ort;\nasync function loadOrt() { return ort ??= await import("onnxruntime-node"); }'
   );
   const embeddingFile = path.join(
-    deployment, "node_modules/@mastra/fastembed/dist/index.js"
+    deployment,
+    "node_modules/@mastra/fastembed/dist/index.js"
   );
   const embeddingSource = await readFile(embeddingFile, "utf8");
-  const sessionCreation = "const session = await ort.InferenceSession.create(modelPath, {";
+  const sessionCreation =
+    "const session = await ort.InferenceSession.create(modelPath, {";
   if (embeddingSource.split(sessionCreation).length !== 3)
     throw new Error("Optional embedding initialization seams changed.");
   await writeFile(
     `${embeddingFile}.tessaract-stage`,
-    embeddingSource.replaceAll(sessionCreation,
-      "await loadOrt();\n\t\t" + sessionCreation)
+    embeddingSource.replaceAll(
+      sessionCreation,
+      "await loadOrt();\n\t\t" + sessionCreation
+    )
   );
   await rename(`${embeddingFile}.tessaract-stage`, embeddingFile);
   await adapt(
     "@mastra/code-sdk",
     "dist/index.js",
     'import { DuckDBStore } from "@mastra/duckdb";',
-    '// Local tracing loads DuckDB only when explicitly enabled.'
+    "// Local tracing loads DuckDB only when explicitly enabled."
   );
   await adapt(
     "@mastra/code-sdk",
     "dist/index.js",
     "const observabilityDuckDB = new DuckDBStore({",
     'const { DuckDBStore } = await import("@mastra/duckdb");\n\t\tconst observabilityDuckDB = new DuckDBStore({'
+  );
+  await adapt(
+    "@mastra/code-sdk",
+    "dist/agents/prompts/index.js",
+    'const modeSpecific = (typeof entry === "function" ? entry(ctx) : entry) ?? "";',
+    'const nativeModeSpecific = (typeof entry === "function" ? entry(ctx) : entry) ?? "";\n\tconst modeSpecific = globalThis.tessaractCodeModePrompt?.(ctx.modeId, nativeModeSpecific) ?? nativeModeSpecific;'
   );
   await adapt(
     "@mastra/code-sdk",
@@ -314,10 +332,12 @@ export async function adaptStagedCodeRuntime(deployment) {
 if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  if (process.argv[2] === "--adapt")
+) {
+  if (process.argv[2] === "--adapt") {
     await adaptStagedCodeRuntime(path.resolve(process.argv[3]));
-  else
+  } else {
     await buildCodeRuntime(
       path.resolve(process.argv[2] ?? "dist/code-runtime")
     );
+  }
+}
