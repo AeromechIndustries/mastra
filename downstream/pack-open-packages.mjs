@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { openPackages } from './open-packages.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const stagingRoot = path.join(root, 'downstream', 'staging');
@@ -23,22 +24,12 @@ for (const manifestPath of execFileSync(
   }
 }
 
-const packages = [
-  { directory: 'packages/_internals/auth', slug: 'internal-auth' },
-  { directory: 'packages/core', slug: 'mastra-core', core: true },
-  { directory: 'packages/editor', slug: 'mastra-editor', editor: true },
-  { directory: 'stores/pg', slug: 'mastra-pg' },
-  { directory: 'packages/fastembed', slug: 'mastra-fastembed', extraFiles: ['LICENSE-fastembed'] },
-  { directory: 'mastracode/sdk', slug: 'mastra-code-sdk' },
-  { directory: 'mastracode/tui', slug: 'mastracode' },
-];
-
 rmSync(stagingRoot, { recursive: true, force: true });
 rmSync(artifactRoot, { recursive: true, force: true });
 mkdirSync(stagingRoot, { recursive: true });
 mkdirSync(artifactRoot, { recursive: true });
 
-for (const descriptor of packages) {
+for (const descriptor of openPackages) {
   const source = path.join(root, descriptor.directory);
   const stage = path.join(stagingRoot, descriptor.slug);
   mkdirSync(stage, { recursive: true });
