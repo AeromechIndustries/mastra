@@ -24,6 +24,7 @@ import type { ProcessAPIErrorArgs, ProcessInputArgs, ProcessInputResult, Process
 
 import { resolveCredentialStore } from '../agents/credential-resolver.js';
 import { resolveModel, resolveRequestThinkingLevel } from '../agents/model.js';
+import { getManagedCodeHost } from '../managed-host.js';
 import {
   getRequestAccountSelection,
   isRequestAccountRoutingExhausted,
@@ -591,6 +592,7 @@ export class AccountRotationProcessor implements Processor {
   ) {}
 
   async processAPIError(args: ProcessAPIErrorArgs): Promise<{ retry: boolean }> {
+    if (getManagedCodeHost()) return { retry: false };
     const { error, state } = args;
 
     // Core runs error processors even after the shared retry budget is spent

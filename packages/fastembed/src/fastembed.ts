@@ -12,8 +12,15 @@ import { AddedToken, Tokenizer } from '@anush008/tokenizers';
 import fs from 'node:fs';
 import type { PathLike } from 'node:fs';
 import path from 'node:path';
-import * as ort from 'onnxruntime-node';
+import type * as Ort from 'onnxruntime-node';
 import { downloadFileToCacheDir } from '@huggingface/hub';
+
+let ortModule: typeof import('onnxruntime-node') | undefined;
+
+async function loadOnnx() {
+  ortModule ??= await import('onnxruntime-node');
+  return ortModule;
+}
 
 export enum ExecutionProvider {
   CPU = 'cpu',
@@ -75,7 +82,7 @@ interface SparseModelInfo {
   description: string;
 }
 
-type ModelInput = Record<string, ort.Tensor>;
+type ModelInput = Record<string, Ort.Tensor>;
 
 function normalize(v: number[]): number[] {
   const norm = Math.sqrt(v.reduce((acc, val) => acc + val * val, 0));
@@ -207,7 +214,7 @@ function loadTokenizerFromDir(modelDir: PathLike, maxLength: number): Tokenizer 
 export class FlagEmbedding extends Embedding {
   private constructor(
     private tokenizer: Tokenizer,
-    private session: ort.InferenceSession,
+    private session: Ort.InferenceSession,
     private model: EmbeddingModel,
   ) {
     super();
@@ -247,6 +254,7 @@ export class FlagEmbedding extends Embedding {
     if (!fs.existsSync(modelPath)) {
       throw new Error(`Model file not found at ${modelPath}`);
     }
+    const ort = await loadOnnx();
     const session = await ort.InferenceSession.create(modelPath, {
       executionProviders,
       graphOptimizationLevel: 'all',
@@ -305,6 +313,7 @@ export class FlagEmbedding extends Embedding {
   }
 
   async *embed(textStrings: string[], batchSize: number = 256) {
+    const ort = await loadOnnx();
     for (let i = 0; i < textStrings.length; i += batchSize) {
       const batchTexts = textStrings.slice(i, i + batchSize);
 
@@ -391,7 +400,7 @@ export class FlagEmbedding extends Embedding {
 export class SparseTextEmbedding extends SparseEmbedding {
   private constructor(
     private tokenizer: Tokenizer,
-    private session: ort.InferenceSession,
+    private session: Ort.InferenceSession,
   ) {
     super();
   }
@@ -430,6 +439,7 @@ export class SparseTextEmbedding extends SparseEmbedding {
       throw new Error(`Model file not found at ${modelPath}`);
     }
 
+    const ort = await loadOnnx();
     const session = await ort.InferenceSession.create(modelPath, {
       executionProviders,
       graphOptimizationLevel: 'all',
@@ -490,6 +500,7 @@ export class SparseTextEmbedding extends SparseEmbedding {
   }
 
   async *embed(textStrings: string[], batchSize: number = 256) {
+    const ort = await loadOnnx();
     for (let i = 0; i < textStrings.length; i += batchSize) {
       const batchTexts = textStrings.slice(i, i + batchSize);
 

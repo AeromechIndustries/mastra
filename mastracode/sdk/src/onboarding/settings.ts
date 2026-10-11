@@ -9,6 +9,7 @@ import { dirname, join } from 'node:path';
 import type { MastraBrowser } from '@mastra/core/browser';
 import type { LSPConfig } from '@mastra/core/workspace';
 import { AuthStorage, PROVIDER_DEFAULT_MODELS } from '../auth/storage.js';
+import { getManagedCodeHost } from '../managed-host.js';
 import {
   ANTHROPIC_PREFIX,
   normalizeAnthropicModelId,
@@ -1366,6 +1367,8 @@ export function resolveDefaultThinkingLevel(
   settings: GlobalSettings,
   mode?: string | null,
 ): { level: ThinkingLevelSetting; source: ThinkingLevelSource } {
+  const managedHost = getManagedCodeHost();
+  if (managedHost) return managedHost.resolveThinkingLevel(settings, mode);
   return resolveThinkingDefault(
     {
       globalDefault: settings.preferences.thinkingLevel,

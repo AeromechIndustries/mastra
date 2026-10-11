@@ -1,4 +1,5 @@
 import type { AgentControllerRequestContext } from '@mastra/core/agent-controller';
+import { getManagedCodeHost } from '../managed-host.js';
 import type { MastraCodeComposedState, MastraCodeState } from '../schema.js';
 import { detectCommonBinariesAsync } from '../utils/binaries.js';
 import { getCurrentGitBranchAsync } from '../utils/project.js';
@@ -51,6 +52,7 @@ export async function getDynamicInstructionSections({
     | undefined;
   const state = agentControllerContext?.getState();
   const modeId = agentControllerContext?.session?.modeId ?? 'build';
+  const managedHost = getManagedCodeHost();
   // No host fallback: when the session carries no project (hosted chat-only
   // sessions), the prompt gets no working directory and no git probe — the
   // server's own cwd/branch must never leak into a session's prompt.
@@ -59,9 +61,13 @@ export async function getDynamicInstructionSections({
   const promptCtx: PromptContext = {
     projectPath,
     projectName: state?.projectName ?? '',
-    gitBranch: projectPath ? ((await getCurrentGitBranchAsync(projectPath)) ?? state?.gitBranch) : undefined,
+    gitBranch: managedHost
+      ? state?.gitBranch
+      : projectPath
+        ? ((await getCurrentGitBranchAsync(projectPath)) ?? state?.gitBranch)
+        : undefined,
     platform: process.platform,
-    commonBinaries: await detectCommonBinariesAsync(),
+    commonBinaries: managedHost ? [] : await detectCommonBinariesAsync(),
     date: new Date().toISOString().split('T')[0]!,
     mode: modeId,
     modelId: agentControllerContext?.session?.modelId || undefined,
@@ -77,7 +83,10 @@ export async function getDynamicInstructionSections({
     hasSubconscious: typeof hasSubconscious === 'function' ? hasSubconscious(state) : hasSubconscious,
   };
 
+  if (managedHost) promptCtx.managed = managedHost.buildPrompt(promptCtx);
+
   const promptSections = buildFullPromptSections(promptCtx);
+  if (managedHost) return promptSections;
   const pluginInstructions: string[] =
     state?.pluginInstructions?.filter((instruction: string) => instruction.trim().length > 0) ?? [];
   if (pluginInstructions.length === 0) return promptSections;

@@ -37,7 +37,7 @@ import { TaskSignalProvider } from '@mastra/core/signals';
 import { InMemoryHarness, MastraCompositeStore } from '@mastra/core/storage';
 import { DEFAULT_GOAL_JUDGE_PROMPT } from '@mastra/core/tools';
 import type { MastraVector } from '@mastra/core/vector';
-import { DuckDBStore } from '@mastra/duckdb';
+import type { DuckDBStore } from '@mastra/duckdb';
 
 import { GithubSignals } from '@mastra/github-signals';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
@@ -86,6 +86,7 @@ import { createOutcomeScorer, createEfficiencyScorer } from './evals/scorers/ind
 import { resolveExperimentalAgent, validateExperimentalAgent, wrapExperimentalAgent } from './experimental-agent.js';
 import { HookManager } from './hooks/index.js';
 import { createKnowledgeInspector as createScopedKnowledgeInspector } from './knowledge-inspector.js';
+import { getManagedCodeHost } from './managed-host.js';
 import { createMcpManager } from './mcp/index.js';
 import type { McpServerConfig } from './mcp/index.js';
 import { hasExplicitOMConfiguration } from './onboarding/om-settings.js';
@@ -398,7 +399,7 @@ export interface MastraCodeConfig {
 }
 
 export function createAuthStorage() {
-  const authStorage = new AuthStorage();
+  const authStorage = new AuthStorage(getManagedCodeHost()?.authPath);
   setAuthStorage(authStorage);
   setOpenAIAuthStorage(authStorage);
   setGitHubCopilotAuthStorage(authStorage);
@@ -664,6 +665,7 @@ export async function createMastraCodeAgentController(config?: MastraCodeConfig)
   let observabilityWarning: string | undefined;
   if (globalSettings.observability.localTracing) {
     try {
+      const { DuckDBStore } = await import('@mastra/duckdb');
       const observabilityDuckDB = new DuckDBStore({
         id: 'mastra-code-observability',
         path: getObservabilityDatabasePath(),
@@ -1510,6 +1512,7 @@ export async function createMastraCodeAgentController(config?: MastraCodeConfig)
     // Ids the model router would hand to another registered gateway (by
     // prefix or `handlesModel`) stay strings so that gateway resolves them.
     resolveSubagentModel: (modelId, { requestContext }) =>
+      !getManagedCodeHost() &&
       routesToOtherGateway(
         modelId,
         Object.values(controller.getMastra()?.listGateways() ?? {}),

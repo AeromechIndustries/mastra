@@ -695,6 +695,11 @@ export class MastraTUI {
     return this.state.pendingNewThread ? null : this.state.session.thread.getId();
   }
 
+  /** Request a full redraw after an injected terminal is attached or resized. */
+  redraw(): void {
+    this.state.ui.requestRender(true);
+  }
+
   /**
    * Stop the TUI and clean up.
    */
@@ -779,6 +784,9 @@ export class MastraTUI {
       this.state.isInitialized = true;
       await this.renderExistingMessagesAndSeedIdleCounter();
       await renderExistingTasks(this.state);
+      if (this.state.options.managedHost.startupNotice) {
+        showInfo(this.state, this.state.options.managedHost.startupNotice);
+      }
       this.state.options.managedHost.onReady?.();
       return;
     }
@@ -1501,11 +1509,15 @@ export class MastraTUI {
   private async handleSlashCommand(input: string): Promise<boolean> {
     if (this.state.options.managedHost) {
       try {
-        showInfo(this.state, await this.state.options.managedHost.dispatchSlashCommand(input));
+        const result = await this.state.options.managedHost.dispatchSlashCommand(input);
+        if (result !== undefined) {
+          showInfo(this.state, result);
+          return true;
+        }
       } catch (error) {
         showError(this.state, error instanceof Error ? error.message : 'Managed command failed');
+        return true;
       }
-      return true;
     }
     return dispatchSlashCommand(input, this.state, () => this.buildCommandContext());
   }
@@ -1515,6 +1527,14 @@ export class MastraTUI {
   // ===========================================================================
 
   async performLogin(providerId: string): Promise<void> {
+    if (this.state.options.managedHost) {
+      showInfo(
+        this.state,
+        this.state.options.managedHost.providerManagementMessage ??
+          'Provider connections are managed by the host application.',
+      );
+      return;
+    }
     const provider = getOAuthProviders().find(p => p.id === providerId);
     const providerName = provider?.name || providerId;
 
@@ -1846,6 +1866,7 @@ export class MastraTUI {
    * @param passive When true, only show an info message (used for periodic rechecks).
    */
   private async checkForUpdate(passive = false): Promise<void> {
+    if (this.state.options.managedHost) return;
     if (process.env.MASTRACODE_DISABLE_UPDATE_CHECK === '1') return;
 
     const currentVersion = this.state.options.version;

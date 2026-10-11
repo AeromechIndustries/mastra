@@ -29,6 +29,7 @@ base, consuming application revision and focused verification recorded in the
 | --- | --- |
 | `packages/core` | Durable execution, agent composition and remote workspace language services. |
 | `stores/pg` | PostgreSQL persistence and background-task serialization. |
+| `packages/fastembed` | Optional local embedding support with deferred native-library loading. |
 | `mastracode/tui` | Native terminal interface and TessarAct branding. |
 | `mastracode/sdk` | Coding controller, model resolution and persistent Code state. |
 | [TessarAct #534](https://github.com/AeromechIndustries/TessarAct/issues/534) | Application integration and native Code acceptance. |

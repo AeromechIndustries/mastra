@@ -305,7 +305,7 @@ export function buildLayout(state: TUIState, refreshModelAuthStatus: () => Promi
   };
 
   state.ui.addChild(new Spacer(1));
-  state.ui.addChild(new HeaderComponent({ version, appName, info }));
+  state.ui.addChild(new HeaderComponent({ version, appName, info, branding: state.options.managedHost?.header }));
   state.ui.addChild(new Spacer(1));
   state.ui.addChild({ render: renderHints, invalidate: () => {} });
   // A gap under the hints once the chat has content; before that, the idle row above the prompt is the gap.
