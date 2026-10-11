@@ -22,18 +22,11 @@ for (const descriptor of openPackages.slice(start)) {
   ];
   if (builds.includes(undefined)) throw new Error(`${manifest.name} has no supported build command`);
   for (const build of builds) {
-    try {
-      execFileSync('corepack', ['pnpm', '--filter', manifest.name, build], {
-        cwd: root,
-        stdio: 'inherit',
-        env: { ...process.env, AEROMECH_OPEN_ONLY: '1' },
-      });
-    } catch (error) {
-      if (!existsSync(path.join(directory, 'dist'))) throw error;
-      console.warn(
-        `${manifest.name} emitted output with upstream type diagnostics; package and release-boundary checks remain mandatory.`,
-      );
-    }
+    execFileSync('corepack', ['pnpm', '--filter', manifest.name, build], {
+      cwd: root,
+      stdio: 'inherit',
+      env: { ...process.env, AEROMECH_OPEN_ONLY: '1' },
+    });
   }
   const output = path.join(directory, 'dist');
   if (!existsSync(output)) throw new Error(`${manifest.name} did not produce dist`);

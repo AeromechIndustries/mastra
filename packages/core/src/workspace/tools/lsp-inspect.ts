@@ -13,6 +13,7 @@ import { z } from 'zod/v4';
 
 import { createTool } from '../../tools';
 import { WORKSPACE_TOOLS } from '../constants';
+import type { WorkspaceFilesystem } from '../filesystem';
 import { requireWorkspace, emitWorkspaceMetadata } from './helpers';
 import { startWorkspaceSpan } from './tracing';
 
@@ -22,10 +23,17 @@ const CURSOR_MARKER = '<<<';
  * Get a single line preview from a file at the specified line number.
  * Returns the trimmed line content, or null if the line cannot be read.
  */
-async function getLinePreview(filePath: string, lineNumber: number): Promise<string | null> {
+async function getLinePreview(
+  filePath: string,
+  lineNumber: number,
+  filesystem?: WorkspaceFilesystem,
+): Promise<string | null> {
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
-    const lines = content.split('\n');
+    const content = filesystem
+      ? await filesystem.readFile(filePath, { encoding: 'utf-8' })
+      : await fs.readFile(filePath, 'utf-8');
+    const text = typeof content === 'string' ? content : content.toString('utf-8');
+    const lines = text.split('\n');
     const line = lines[lineNumber - 1];
     return line?.trim() ?? null;
   } catch {
@@ -176,7 +184,10 @@ export const lspInspectTool = createTool({
 
     let fileContent = '';
     try {
-      fileContent = await fs.readFile(absolutePath, 'utf-8');
+      const content = workspace.filesystem
+        ? await workspace.filesystem.readFile(absolutePath, { encoding: 'utf-8' })
+        : await fs.readFile(absolutePath, 'utf-8');
+      fileContent = typeof content === 'string' ? content : content.toString('utf-8');
     } catch {
       fileContent = '';
     }
@@ -291,7 +302,9 @@ export const lspInspectTool = createTool({
         .filter(loc => !(loc.path === absolutePath && loc.line === line));
 
       if (definitionLocations.length > 0) {
-        const previews = await Promise.all(definitionLocations.map(loc => getLinePreview(loc.path, loc.line)));
+        const previews = await Promise.all(
+          definitionLocations.map(loc => getLinePreview(loc.path, loc.line, workspace.filesystem)),
+        );
         result.definition = definitionLocations.map((loc, i) => ({
           location: `${compressPath(loc.path)}:L${loc.line}:C${loc.character}`,
           preview: previews[i],
@@ -325,8 +338,6 @@ export const lspInspectTool = createTool({
     } catch (err) {
       result.error = `LSP query failed: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
-      // Clean up - close the file and release the client lease
-      client.notifyClose(absolutePath);
       release();
     }
 

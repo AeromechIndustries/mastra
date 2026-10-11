@@ -5,5 +5,16 @@
     "rootDir": "./src"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "**/*.test.ts", "src/**/*.mock.ts"]
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts",
+    "src/**/*.mock.ts",
+    "src/server/handlers/agent-builder.ts",
+    "src/server/handlers/builder-registry.ts",
+    "src/server/handlers/editor-builder.ts",
+    "src/server/handlers/workflow-builder.ts",
+    "src/server/server-adapter/routes/agent-builder.ts",
+    "src/server/server-adapter/routes/editor-builder.ts",
+    "src/server/utils/resolve-builder-model-policy.ts"
+  ]
 }

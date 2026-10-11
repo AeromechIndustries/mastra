@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { TripWire } from '../agent/trip-wire';
-import type { ActorSignal } from '../auth/ee';
+import type { ActorSignal } from '../auth/open-only';
 import { RequestContext } from '../di';
 import { MastraError, MastraNonRetryableError, ErrorDomain, ErrorCategory } from '../error';
 import type { SerializedError } from '../error';

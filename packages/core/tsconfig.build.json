@@ -12,6 +12,8 @@
     "src/**/*.mock.ts",
     "**/__tests__/**/*",
     "**/*.test-d.ts",
-    "src/*/**/test-utils/**/*"
+    "src/*/**/test-utils/**/*",
+    "src/auth/ee/**/*",
+    "src/agent-builder/ee/**/*"
   ]
 }

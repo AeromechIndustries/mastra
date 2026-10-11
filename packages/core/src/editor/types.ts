@@ -1,5 +1,5 @@
 import type { Agent } from '../agent';
-import type { AgentBuilderOptions, BuilderModelPolicy, IAgentBuilder } from '../agent-builder/ee';
+import type { AgentBuilderOptions, BuilderModelPolicy, IAgentBuilder } from '../agent-builder/open-only';
 import type { MastraBrowser } from '../browser/browser';
 import type { MastraScorer } from '../evals';
 import type { MastraModelConfig } from '../llm/model/shared.types';

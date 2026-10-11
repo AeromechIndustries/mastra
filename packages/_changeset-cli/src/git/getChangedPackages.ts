@@ -14,19 +14,20 @@ export async function getChangedPackages(): Promise<ChangedPackage[]> {
     const packages = await getPublicPackages();
 
     let changedPackageDirs;
-    try {
-      changedPackageDirs = await getChangedPackagesSinceRef({
-        cwd: rootDir,
-        ref: 'origin/main',
-        changedFilePatterns: ['**/*'],
-      });
-    } catch {
-      changedPackageDirs = await getChangedPackagesSinceRef({
-        cwd: rootDir,
-        ref: 'main',
-        changedFilePatterns: ['**/*'],
-      });
+    let lastError: unknown;
+    for (const ref of ['origin/master', 'master', 'origin/main', 'main']) {
+      try {
+        changedPackageDirs = await getChangedPackagesSinceRef({
+          cwd: rootDir,
+          ref,
+          changedFilePatterns: ['**/*'],
+        });
+        break;
+      } catch (error) {
+        lastError = error;
+      }
     }
+    if (!changedPackageDirs) throw lastError;
 
     const changedPackages: ChangedPackage[] = [];
 

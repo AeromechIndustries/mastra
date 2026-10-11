@@ -137,7 +137,7 @@ export const GET_API_SCHEMA_ROUTE = createRoute({
   handler: async () => {
     // Dynamic import to avoid circular dependency issues
     const { buildApiSchemaManifest } = await import('../server-adapter/api-schema-manifest');
-    return buildApiSchemaManifest();
+    return buildApiSchemaManifest() as any;
   },
 });
 

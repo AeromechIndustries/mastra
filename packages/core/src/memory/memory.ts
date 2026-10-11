@@ -1,8 +1,8 @@
 import type { AssistantContent, UserContent, CoreMessage } from '@internal/ai-sdk-v4';
 import type { MastraDBMessage } from '../agent/message-list';
 import type { AgentSignalType } from '../agent/signals';
-import { MastraFGAPermissions } from '../auth/ee';
-import type { MastraFGAPermissionInput, ActorSignal } from '../auth/ee';
+import { MastraFGAPermissions } from '../auth/open-only';
+import type { MastraFGAPermissionInput, ActorSignal } from '../auth/open-only';
 import { MastraBase } from '../base';
 import { ErrorDomain, MastraError } from '../error';
 import { ModelRouterEmbeddingModel } from '../llm/model';
@@ -680,7 +680,7 @@ https://mastra.ai/en/docs/memory/overview`,
     const fgaProvider = mastra?.getServer()?.fga;
     if (!fgaProvider) return;
 
-    const { requireFGA } = await import('../auth/ee/fga-check');
+    const { requireFGA } = await import('../auth/open-only');
     await requireFGA({
       fgaProvider,
       user,

@@ -10,7 +10,7 @@ import type {
 import type { MastraPrimitives, MastraUnion } from '../action';
 export type { MastraPrimitives, MastraUnion };
 import type { MastraDBMessage } from '../agent/message-list';
-import type { ActorSignal } from '../auth/ee';
+import type { ActorSignal } from '../auth/open-only';
 import type { BackgroundTaskAdoptionContext, ToolBackgroundConfig } from '../background-tasks';
 import type { MastraBrowser } from '../browser/browser';
 import type { Mastra } from '../mastra';

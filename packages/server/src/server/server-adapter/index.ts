@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ToolsInput } from '@mastra/core/agent';
-import type { FGARouteConfig, FGARouteInfo, IFGAProvider, MastraFGAPermissionInput } from '@mastra/core/auth/ee';
+import type { FGARouteConfig, FGARouteInfo, IFGAProvider, MastraFGAPermissionInput } from '@mastra/core/auth/open-only';
 import type { Mastra } from '@mastra/core/mastra';
 import { RequestContext } from '@mastra/core/request-context';
 import { MastraServerBase } from '@mastra/core/server';
@@ -866,7 +866,7 @@ export abstract class MastraServer<TApp, TRequest, TResponse> extends MastraServ
     if (configuredFeatures.length === 0) return;
 
     try {
-      const { isEEEnabled } = await import('@mastra/core/auth/ee');
+      const { isEEEnabled } = await import('@mastra/core/auth/open-only');
       if (!isEEEnabled()) {
         const featureList = configuredFeatures.join(' and ');
         throw new Error(
@@ -877,10 +877,8 @@ export abstract class MastraServer<TApp, TRequest, TResponse> extends MastraServ
       if (err instanceof Error && err.message.startsWith('[mastra/auth-ee]')) {
         throw err;
       }
-      // @mastra/core/auth/ee module not available; EE authorization cannot function.
       throw new Error(
-        `[mastra/auth-ee] ${configuredFeatures.join(' and ')} ${configuredFeatures.length === 1 ? 'is' : 'are'} configured but the EE module (@mastra/core/auth/ee) could not be loaded.\n` +
-          'Ensure @mastra/core is updated to a version that includes EE support.',
+        `[mastra/auth] ${configuredFeatures.join(' and ')} ${configuredFeatures.length === 1 ? 'is' : 'are'} unavailable in this open-only distribution.`,
       );
     }
   }
@@ -894,7 +892,7 @@ export abstract class MastraServer<TApp, TRequest, TResponse> extends MastraServ
     if (!editor?.hasEnabledBuilderConfig?.()) return;
 
     try {
-      const { isEEEnabled } = await import('@mastra/core/auth/ee');
+      const { isEEEnabled } = await import('@mastra/core/auth/open-only');
       if (!isEEEnabled()) {
         throw new Error('[mastra/auth-ee] Agent Builder is not available in this open-only distribution.');
       }
@@ -902,11 +900,7 @@ export abstract class MastraServer<TApp, TRequest, TResponse> extends MastraServ
       if (err instanceof Error && err.message.startsWith('[mastra/auth-ee]')) {
         throw err;
       }
-      // @mastra/core/auth/ee module not available — Agent Builder cannot function
-      throw new Error(
-        '[mastra/auth-ee] Agent Builder is configured but the EE module (@mastra/core/auth/ee) could not be loaded.\n' +
-          'Ensure @mastra/core is updated to a version that includes EE support.',
-      );
+      throw new Error('[mastra/auth] Agent Builder is unavailable in this open-only distribution.');
     }
   }
 

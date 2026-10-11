@@ -1,7 +1,7 @@
 import type * as http from 'node:http';
 import type { JSONSchema7 } from 'json-schema';
 import type { ToolsInput, Agent } from '../agent';
-import type { MastraFGAPermissionInput } from '../auth/ee/interfaces/permissions.generated';
+import type { MastraFGAPermissionInput } from '../auth/open-only';
 import type { RequestContext } from '../request-context';
 import type { Workflow } from '../workflows';
 

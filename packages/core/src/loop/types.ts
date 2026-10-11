@@ -15,7 +15,7 @@ import type { MessageInput, MessageList } from '../agent/message-list';
 import type { SaveQueueManager } from '../agent/save-queue';
 import type { AgentSignalType, CreatedAgentSignal } from '../agent/signals';
 import type { GoalConfig, StructuredOutputOptions } from '../agent/types';
-import type { ActorSignal } from '../auth/ee';
+import type { ActorSignal } from '../auth/open-only';
 import type { AgentBackgroundConfig, BackgroundTaskManager, BackgroundTaskManagerConfig } from '../background-tasks';
 import type { ModelRouterModelId } from '../llm/model';
 import type { MastraModelSettings } from '../llm/model/model-settings';

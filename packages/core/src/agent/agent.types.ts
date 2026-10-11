@@ -1,5 +1,5 @@
 import type { ModelMessage, ToolChoice } from '@internal/ai-sdk-v5';
-import type { ActorSignal } from '../auth/ee';
+import type { ActorSignal } from '../auth/open-only';
 import type { WaitUntilFn } from '../channels/wait-until';
 import type { MastraScorer, MastraScorers, ScoringFilter, ScoringSamplingConfig } from '../evals';
 import type { SystemMessage } from '../llm';

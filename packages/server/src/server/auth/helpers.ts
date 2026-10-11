@@ -1,5 +1,5 @@
 import type { ISessionProvider } from '@mastra/core/auth';
-import type { IRBACProvider, EEUser } from '@mastra/core/auth/ee';
+import type { IRBACProvider, EEUser } from '@mastra/core/auth/open-only';
 import type { Mastra } from '@mastra/core/mastra';
 import { CompositeAuth } from '@mastra/core/server';
 import type { ApiRoute, IMastraAuthProvider, MastraAuthConfig, MastraAuthRequest } from '@mastra/core/server';
