@@ -870,10 +870,7 @@ export abstract class MastraServer<TApp, TRequest, TResponse> extends MastraServ
       if (!isEEEnabled()) {
         const featureList = configuredFeatures.join(' and ');
         throw new Error(
-          `[mastra/auth-ee] ${featureList} ${configuredFeatures.length === 1 ? 'is' : 'are'} configured but no valid EE license was found.\n` +
-            `${featureList} ${configuredFeatures.length === 1 ? 'requires' : 'require'} a Mastra Enterprise License for production use.\n` +
-            'Set the MASTRA_EE_LICENSE environment variable with your license key.\n' +
-            'Learn more: https://github.com/mastra-ai/mastra/blob/main/ee/LICENSE',
+          `[mastra/auth-ee] ${featureList} ${configuredFeatures.length === 1 ? 'is' : 'are'} not available in this open-only distribution.`,
         );
       }
     } catch (err) {
@@ -899,12 +896,7 @@ export abstract class MastraServer<TApp, TRequest, TResponse> extends MastraServ
     try {
       const { isEEEnabled } = await import('@mastra/core/auth/ee');
       if (!isEEEnabled()) {
-        throw new Error(
-          '[mastra/auth-ee] Agent Builder is configured but no valid EE license was found.\n' +
-            'Agent Builder requires a Mastra Enterprise License for production use.\n' +
-            'Set the MASTRA_EE_LICENSE environment variable with your license key.\n' +
-            'Learn more: https://github.com/mastra-ai/mastra/blob/main/ee/LICENSE',
-        );
+        throw new Error('[mastra/auth-ee] Agent Builder is not available in this open-only distribution.');
       }
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('[mastra/auth-ee]')) {

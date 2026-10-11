@@ -11,7 +11,7 @@ import type {
   AgentEditorConfig,
 } from '@mastra/core/agent';
 import type { MessageListInput } from '@mastra/core/agent/message-list';
-import type { BuilderModelPolicy, DefaultModelEntry, ProviderModelEntry } from '@mastra/core/agent-builder/ee';
+import type { BuilderModelPolicy, DefaultModelEntry, ProviderModelEntry } from '@mastra/core/agent-builder/open-only';
 import type { ScoreRowData } from '@mastra/core/evals';
 import type { CoreMessage, Provider as ModelProviderId } from '@mastra/core/llm';
 import type {
@@ -2395,7 +2395,7 @@ export interface BuilderAgentFeatures {
 }
 
 /**
- * Re-exported from `@mastra/core/agent-builder/ee` so SDK consumers don't need
+ * Re-exported from `@mastra/core/agent-builder/open-only` so SDK consumers don't need
  * a second import for admin model configuration types. Owned by core.
  */
 export type { BuilderModelPolicy, DefaultModelEntry, ProviderModelEntry, ModelProviderId };

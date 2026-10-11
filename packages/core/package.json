@@ -121,6 +121,16 @@
         "default": "./dist/agent-builder/ee/index.cjs"
       }
     },
+    "./agent-builder/open-only": {
+      "import": {
+        "types": "./dist/agent-builder/open-only.d.ts",
+        "default": "./dist/agent-builder/open-only.js"
+      },
+      "require": {
+        "types": "./dist/agent-builder/open-only.d.ts",
+        "default": "./dist/agent-builder/open-only.cjs"
+      }
+    },
     "./background-tasks": {
       "import": {
         "types": "./dist/background-tasks/index.d.ts",
