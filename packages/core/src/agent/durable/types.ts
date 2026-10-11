@@ -725,6 +725,12 @@ export interface RunRegistryEntry {
    * `tools` when seeding a step (issue #22933).
    */
   baseTools?: Record<string, CoreTool>;
+  /**
+   * The current tool snapshot was freshly authorized for this execution and is
+   * therefore authoritative. Missing tools must not be restored from an agent-
+   * or host-wide fallback catalog.
+   */
+  authorizedToolsOnly?: boolean;
   /** SaveQueueManager for message persistence (undefined when memory is not configured) */
   saveQueueManager?: SaveQueueManager;
   /** Memory instance for thread creation and message persistence */

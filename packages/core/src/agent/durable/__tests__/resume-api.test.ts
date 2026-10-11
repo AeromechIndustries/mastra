@@ -20,6 +20,7 @@ import { PubSub } from '../../../events/pubsub';
 import type { Event, EventCallback, SubscribeOptions } from '../../../events/types';
 import { Mastra } from '../../../mastra';
 import { MockMemory } from '../../../memory/mock';
+import { RequestContext } from '../../../request-context';
 import { InMemoryStore } from '../../../storage';
 import { createTool } from '../../../tools';
 import type { WorkflowRunState } from '../../../workflows/types';
@@ -433,6 +434,66 @@ describe('Resume API', () => {
 
       expect(prepareSpy).not.toHaveBeenCalled();
       expect(result.runId).toBe(runId);
+      result.cleanup();
+    });
+
+    it('reauthorizes a warm resume and replaces stale context and tools', async () => {
+      const store = new InMemoryStore();
+      const rehydrateExecution = vi.fn(async () => ({
+        requestContext: new RequestContext([
+          ['tenantId', 'fresh-tenant'],
+          ['credential', 'fresh-credential'],
+        ]),
+        activeTools: ['allowedTool'],
+        clientTools: {
+          allowedTool: { description: 'allowed', execute: vi.fn() },
+        },
+      }));
+      const baseAgent = new Agent({
+        id: 'warm-reauthorization-agent',
+        name: 'Warm Reauthorization Agent',
+        instructions: 'Test warm resume reauthorization',
+        model: createTextModel('Resumed!') as LanguageModelV2,
+      });
+      const durableAgent = createDurableAgent({
+        agent: baseAgent,
+        pubsub,
+        rehydrateExecution: rehydrateExecution as never,
+      });
+      void new Mastra({ agents: { warmReauthorizationAgent: durableAgent }, storage: store, logger: false });
+
+      const runId = 'warm-reauthorization-run';
+      const staleContext = new RequestContext([
+        ['tenantId', 'stale-tenant'],
+        ['credential', 'stale-credential'],
+      ]);
+      await durableAgent.prepare('Start something', {
+        runId,
+        requestContext: staleContext,
+        clientTools: {
+          revokedTool: { description: 'revoked', execute: vi.fn() },
+        },
+      });
+      await seedSuspendedRun(store, runId, durableAgent.id, {
+        threadId: 'warm-thread',
+        resourceId: 'warm-resource',
+      });
+
+      const result = await durableAgent.resume(runId, { approved: true });
+      const entry = globalRunRegistry.get(runId);
+
+      expect(rehydrateExecution).toHaveBeenCalledOnce();
+      expect(rehydrateExecution).toHaveBeenCalledWith({
+        runId,
+        agentId: durableAgent.id,
+        operation: 'resume',
+        requestContextEntries: { tenantId: 'tenant-1' },
+      });
+      expect(entry?.requestContext?.get('tenantId')).toBe('fresh-tenant');
+      expect(entry?.requestContext?.get('credential')).toBe('fresh-credential');
+      expect(Object.keys(entry?.tools ?? {})).toEqual(['allowedTool']);
+      expect(entry?.baseTools).toBe(entry?.tools);
+      expect(entry?.authorizedToolsOnly).toBe(true);
       result.cleanup();
     });
 

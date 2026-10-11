@@ -63,6 +63,27 @@ import { isJsonSafe } from './workflows/shared/schemas';
  * path passes. Best-effort: entries that fail a JSON round-trip are skipped
  * so a single non-serializable value can't break the workflow input.
  */
+export function projectDurableRequestContext(
+  requestContext: RequestContext,
+  project?: (context: RequestContext) => Record<string, unknown>,
+): RequestContext {
+  if (!project) return requestContext;
+
+  // Workflow engines and observability serialize RequestContext independently
+  // from the explicit workflow input. Preserve the live entries for tools while
+  // applying the same application-owned projection at every serialization
+  // boundary so credentials cannot leak through an engine snapshot or span.
+  return new (class ProjectedDurableRequestContext extends RequestContext {
+    override toJSON(): Record<string, unknown> {
+      return snapshotRequestContextEntries(this, project) ?? {};
+    }
+
+    override serializeForSpan(): Record<string, unknown> {
+      return this.toJSON();
+    }
+  })(requestContext.entries());
+}
+
 function snapshotRequestContextEntries(
   requestContext: RequestContext | undefined,
   project?: (context: RequestContext) => Record<string, unknown>,
@@ -301,7 +322,10 @@ export async function prepareForDurableExecution<OUTPUT = undefined>(
   const messageId = crypto.randomUUID();
 
   // 2. Get request context
-  const requestContext = providedRequestContext ?? new RequestContext();
+  const requestContext = projectDurableRequestContext(
+    providedRequestContext ?? new RequestContext(),
+    snapshotRequestContext,
+  );
 
   // 2a. Validate the request context against the agent's requestContextSchema,
   // mirroring Agent.stream()/generate(). Without this, schema violations are
@@ -932,7 +956,7 @@ export async function prepareForDurableExecution<OUTPUT = undefined>(
  * in-process `RunRegistryEntry`. Returns `undefined` when no valid headers are
  * present so the registry slot stays empty rather than carrying an empty object.
  */
-function extractCallTimeHeaders(
+export function extractCallTimeHeaders(
   modelSettings: Record<string, unknown> | undefined,
 ): Record<string, string> | undefined {
   const raw = (modelSettings as Record<string, unknown> | undefined)?.headers;
