@@ -1,4 +1,4 @@
-import type { ActorSignal } from '../auth/ee';
+import type { ActorSignal } from '../auth/open-only';
 import type { StepResult } from '../workflows/types';
 
 export type { WorkerDeps, WorkerStopOptions } from './worker';

@@ -5,8 +5,8 @@ import type { StandardSchemaWithJSON } from '@mastra/schema-compat/schema';
 import type { JSONSchema7 } from 'json-schema';
 import { z } from 'zod/v4';
 import type { MastraPrimitives, MastraUnion } from '../action';
-import { MastraFGAPermissions } from '../auth/ee';
-import type { ActorSignal } from '../auth/ee';
+import { MastraFGAPermissions } from '../auth/open-only';
+import type { ActorSignal } from '../auth/open-only';
 import type { AgentBackgroundConfig, ToolBackgroundConfig } from '../background-tasks';
 import { MastraBase } from '../base';
 import type { MastraBrowser } from '../browser/browser';
@@ -3975,7 +3975,14 @@ export class Agent<
    * @internal
    */
   __fork(): Agent<TAgentId, TTools, TOutput, TRequestContext> {
-    const fork = new Agent<TAgentId, TTools, TOutput, TRequestContext>({
+    return this.__forkWithFactory(config => new Agent<TAgentId, TTools, TOutput, TRequestContext>(config));
+  }
+
+  /** Compose a trusted host-specific agent without losing the published configuration. */
+  __forkWithFactory<TFork extends Agent<TAgentId, TTools, TOutput, TRequestContext>>(
+    factory: (config: AgentConfig<TAgentId, TTools, TOutput, TRequestContext>) => TFork,
+  ): TFork {
+    const fork = factory({
       ...this.#config,
       rawConfig: this.toRawConfig(),
     } as AgentConfig<TAgentId, TTools, TOutput, TRequestContext>);
@@ -7679,7 +7686,7 @@ export class Agent<
 
     const user = requestContext?.get('user');
     const executionResourceId = this.#getAgentExecutionResourceId({ requestContext, memory, snapshotMemoryInfo });
-    const { getAgentFGAResourceId, requireFGA } = await import('../auth/ee/fga-check');
+    const { getAgentFGAResourceId, requireFGA } = await import('../auth/open-only');
     await requireFGA({
       fgaProvider,
       user,

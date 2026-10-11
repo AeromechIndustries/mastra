@@ -3,7 +3,7 @@ import type { RequestContext } from '@mastra/core/di';
 import type { FavoritesStorage, StorageFavoriteEntityType } from '@mastra/core/storage';
 
 import { getCallerAuthorId } from './authorship';
-import { isBuilderFeatureEnabled } from './editor-builder';
+import { isBuilderFeatureEnabled } from './open-only-builder';
 
 /**
  * Result of `prepareFavoritesEnrichment` — `null` when the `favorites` EE feature is off.

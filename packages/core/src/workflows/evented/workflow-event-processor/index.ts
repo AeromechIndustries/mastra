@@ -1,5 +1,5 @@
 import EventEmitter from 'node:events';
-import type { ActorSignal } from '../../../auth/ee';
+import type { ActorSignal } from '../../../auth/open-only';
 import { ErrorCategory, ErrorDomain, MastraError, getErrorFromUnknown } from '../../../error';
 import { EventProcessor } from '../../../events/processor';
 import { NoopLeaseProvider, isLeaseProvider } from '../../../events/pubsub';

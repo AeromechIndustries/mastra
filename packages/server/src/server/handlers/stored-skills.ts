@@ -25,9 +25,9 @@ import {
   matchesAuthorFilter,
   resolveAuthorFilter,
 } from './authorship';
-import { isBuilderFeatureEnabled } from './editor-builder';
 import { handleError } from './error';
 import { enrichOrStripFavorites, prepareFavoritesEnrichment, stripFavoriteFields } from './favorites-enrichment';
+import { isBuilderFeatureEnabled } from './open-only-builder';
 
 // ============================================================================
 // Helpers

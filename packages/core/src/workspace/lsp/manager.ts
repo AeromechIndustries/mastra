@@ -418,13 +418,18 @@ export class LSPManager {
     serverName: string;
     release: () => void;
   } | null> {
+    const unlock = await this.acquireFileLock(filePath);
     const lease = await this.acquireClientLease(onAcquired => this.getClientInternal(filePath, onAcquired));
-    if (!lease) return null;
+    if (!lease) {
+      unlock();
+      return null;
+    }
 
-    const { client, release } = lease;
+    const { client } = lease;
     const languageId = getLanguageId(filePath, this.customExtensions);
     if (!languageId) {
-      release();
+      lease.release();
+      unlock();
       return null;
     }
 
@@ -448,9 +453,26 @@ export class LSPManager {
       // Use the same URI format as notifyOpen (pathToFileURL for proper encoding)
       const { pathToFileURL } = await import('node:url');
       const uri = pathToFileURL(filePath).toString();
-      return { client, uri, languageId, serverName: client.serverName, release };
+      let released = false;
+      return {
+        client,
+        uri,
+        languageId,
+        serverName: client.serverName,
+        release: () => {
+          if (released) return;
+          released = true;
+          try {
+            client.notifyClose(filePath);
+          } finally {
+            lease.release();
+            unlock();
+          }
+        },
+      };
     } catch (error) {
-      release();
+      lease.release();
+      unlock();
       throw error;
     }
   }

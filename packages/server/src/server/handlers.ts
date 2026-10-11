@@ -1,4 +1,3 @@
-export * as agentBuilder from './handlers/agent-builder';
 export { formatZodError, isZodError, type ZodErrorLike } from './handlers/error';
 export * as agents from './handlers/agents';
 export * as plans from './handlers/plans';

@@ -1,4 +1,4 @@
-import type { ActorSignal } from '../../auth/ee';
+import type { ActorSignal } from '../../auth/open-only';
 
 /**
  * Resolves the FGA `actor` to hand to the agent/tool call a declarative step

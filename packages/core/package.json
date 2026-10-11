@@ -101,24 +101,14 @@
         "default": "./dist/auth/index.cjs"
       }
     },
-    "./auth/ee": {
+    "./auth/open-only": {
       "import": {
-        "types": "./dist/auth/ee/index.d.ts",
-        "default": "./dist/auth/ee/index.js"
+        "types": "./dist/auth/open-only.d.ts",
+        "default": "./dist/auth/open-only.js"
       },
       "require": {
-        "types": "./dist/auth/ee/index.d.ts",
-        "default": "./dist/auth/ee/index.cjs"
-      }
-    },
-    "./agent-builder/ee": {
-      "import": {
-        "types": "./dist/agent-builder/ee/index.d.ts",
-        "default": "./dist/agent-builder/ee/index.js"
-      },
-      "require": {
-        "types": "./dist/agent-builder/ee/index.d.ts",
-        "default": "./dist/agent-builder/ee/index.cjs"
+        "types": "./dist/auth/open-only.d.ts",
+        "default": "./dist/auth/open-only.cjs"
       }
     },
     "./agent-builder/open-only": {

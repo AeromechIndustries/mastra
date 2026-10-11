@@ -2,7 +2,7 @@ export const openPackages = [
   ['packages/_internals/auth', 'internal-auth'],
   ['packages/core', 'mastra-core', { core: true }],
   ['packages/schema-compat', 'mastra-schema-compat'],
-  ['packages/server', 'mastra-server', { allowDiagnostics: true }],
+  ['packages/server', 'mastra-server'],
   ['browser/agent-browser', 'mastra-agent-browser'],
   ['client-sdks/ai-sdk', 'mastra-ai-sdk'],
   ['client-sdks/client-js', 'mastra-client-js'],

@@ -3,7 +3,7 @@ import type { Agent } from '../agent/agent';
 import type { AgentExecutionOptions } from '../agent/agent.types';
 import type { SubAgent } from '../agent/subagent';
 import type { AgentStreamOptions } from '../agent/types';
-import type { ActorSignal } from '../auth/ee';
+import type { ActorSignal } from '../auth/open-only';
 import type { Classifier, ClassifierQuestions } from '../classifier';
 import type { MastraScorers } from '../evals';
 import { toStandardSchema } from '../schema';

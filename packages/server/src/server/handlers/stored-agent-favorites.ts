@@ -5,8 +5,8 @@ import { createRoute } from '../server-adapter/routes/route-builder';
 import { assertStoredResourceScope, getStoredResourceScope } from '../utils';
 
 import { assertReadAccess, getCallerAuthorId } from './authorship';
-import { requireBuilderFeature } from './editor-builder';
 import { handleError } from './error';
+import { requireBuilderFeature } from './open-only-builder';
 
 /**
  * Resolves the storage and favorites domains, throwing 500 if unavailable.

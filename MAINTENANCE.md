@@ -25,15 +25,15 @@ base, consuming application revision and focused verification recorded in the
   been reviewed and accepted. The package-content gate must inspect the packed
   artifact, not only the source tree.
 
-| Source | Role |
-| --- | --- |
-| `packages/core` | Durable execution, agent composition and remote workspace language services. |
-| `stores/pg` | PostgreSQL persistence and background-task serialization. |
-| `packages/fastembed` | Optional local embedding support with deferred native-library loading. |
-| `mastracode/tui` | Native terminal interface and TessarAct branding. |
-| `mastracode/sdk` | Coding controller, model resolution and persistent Code state. |
-| [TessarAct #534](https://github.com/AeromechIndustries/TessarAct/issues/534) | Application integration and native Code acceptance. |
-| [infrastrActure build contract](https://github.com/AeromechIndustries/infrastrActure/blob/dev/docs/operations/README.md) | Governed image build, publication and deployment. |
+| Source                                                                                                                   | Role                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `packages/core`                                                                                                          | Durable execution, agent composition and remote workspace language services. |
+| `stores/pg`                                                                                                              | PostgreSQL persistence and background-task serialization.                    |
+| `packages/fastembed`                                                                                                     | Optional local embedding support with deferred native-library loading.       |
+| `mastracode/tui`                                                                                                         | Native terminal interface and TessarAct branding.                            |
+| `mastracode/sdk`                                                                                                         | Coding controller, model resolution and persistent Code state.               |
+| [TessarAct #534](https://github.com/AeromechIndustries/TessarAct/issues/534)                                             | Application integration and native Code acceptance.                          |
+| [infrastrActure build contract](https://github.com/AeromechIndustries/infrastrActure/blob/dev/docs/operations/README.md) | Governed image build, publication and deployment.                            |
 
 ## Branches and setup
 
@@ -65,9 +65,9 @@ including Mastra, Mobile-TUI and future adopted projects:
 - Review imports of upstream changes together with our patch set and focused
   checks. Publish a deliberate integration through our fork's PR workflow.
 
-| Fork | Downstream | Upstream |
-| --- | --- | --- |
-| `AeromechIndustries/mastra` | `origin/master` | `mastra-ai/mastra`, `upstream/main` |
+| Fork                            | Downstream      | Upstream                            |
+| ------------------------------- | --------------- | ----------------------------------- |
+| `AeromechIndustries/mastra`     | `origin/master` | `mastra-ai/mastra`, `upstream/main` |
 | `AeromechIndustries/Mobile-TUI` | `origin/master` | `connorads/remobi`, `upstream/main` |
 
 After clone, inspect `git remote -v` and `git branch -r`. Verify the original
@@ -112,6 +112,8 @@ For an integration update:
 2. Review upstream changes and carry the relevant downstream adaptations as
    source-level commits.
 3. Build and check the affected packages using the upstream workspace tools.
+   Any code or declaration-generation failure stops the release; previously
+   emitted output is not accepted as a substitute for a successful build.
 4. Record the package versions, source commit, checks and license notices.
 5. Run `pnpm check:aeromech-release -- <packed-package-or-directory>...` and
    retain its result with the source commit.

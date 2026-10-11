@@ -31,8 +31,7 @@ function getTableName(schemaName?: string) {
 }
 
 function serializeJson(v: unknown): any {
-  if (typeof v === 'object' && v != null) return toPgJson(v);
-  return v ?? null;
+  return v === undefined ? null : toPgJson(v);
 }
 
 function parseJson(v: unknown): any {
@@ -63,9 +62,9 @@ function rowToTask(row: Record<string, any>): BackgroundTask {
     threadId: row.thread_id ?? undefined,
     resourceId: row.resource_id ?? undefined,
     runId: row.run_id,
-    result: parseJson(row.result),
+    result: row.result,
     error: parseJson(row.error),
-    suspendPayload: parseJson(row.suspend_payload),
+    suspendPayload: row.suspend_payload,
     retryCount: Number(row.retry_count),
     maxRetries: Number(row.max_retries),
     timeoutMs: Number(row.timeout_ms),
@@ -251,10 +250,10 @@ export class BackgroundTasksPG extends BackgroundTasksStorage {
         resource_id: task.resourceId ?? null,
         run_id: task.runId,
         status: task.status,
-        args: serializeJson(task.args),
-        result: serializeJson(task.result),
-        error: serializeJson(task.error),
-        suspend_payload: serializeJson(task.suspendPayload),
+        args: task.args,
+        result: task.result ?? null,
+        error: task.error ?? null,
+        suspend_payload: task.suspendPayload ?? null,
         retry_count: task.retryCount,
         max_retries: task.maxRetries,
         timeout_ms: task.timeoutMs,

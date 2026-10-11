@@ -1,13 +1,12 @@
 import type { Mastra } from '@mastra/core';
 import type { ToolsInput } from '@mastra/core/agent';
-import type { FGARouteConfig, MastraFGAPermissionInput } from '@mastra/core/auth/ee';
+import type { FGARouteConfig, MastraFGAPermissionInput } from '@mastra/core/auth/open-only';
 import type { RequestContext } from '@mastra/core/request-context';
 import type { ApiRoute, ValidationErrorHook } from '@mastra/core/server';
 import type * as z from 'zod/v4';
 import type { InMemoryTaskStore } from '../../a2a/store';
 import type { OpenAPIRoute } from '../openapi-utils';
 import { A2A_ROUTES } from './a2a';
-import { AGENT_BUILDER_ROUTES } from './agent-builder';
 import { AGENT_CONTROLLER_ROUTES } from './agent-controller';
 import { AGENTS_ROUTES } from './agents';
 import type { AgentRoutes } from './agents';
@@ -17,7 +16,6 @@ import { CHANNELS_ROUTES } from './channels';
 import { CONVERSATIONS_ROUTES } from './conversations';
 import { DATASETS_ROUTES } from './datasets';
 import { DYNAMIC_WORKFLOWS_ROUTES } from './dynamic-workflows';
-import { EDITOR_BUILDER_ROUTES } from './editor-builder';
 import { LEGACY_ROUTES } from './legacy';
 import { LOGS_ROUTES } from './logs';
 import { MCP_ROUTES } from './mcp';
@@ -191,8 +189,6 @@ export const SERVER_ROUTES: readonly ServerRoute[] = [
   ...SYSTEM_ROUTES,
   ...DATASETS_ROUTES,
   ...BACKGROUND_TASK_ROUTES,
-  ...EDITOR_BUILDER_ROUTES,
-  ...AGENT_BUILDER_ROUTES,
   ...SCHEDULES_ROUTES,
   ...CHANNELS_ROUTES,
   ...AGENT_CONTROLLER_ROUTES,
@@ -216,7 +212,6 @@ export type ServerRoutes = readonly [
   ...typeof LOGS_ROUTES,
   ...typeof VECTORS_ROUTES,
   ...typeof A2A_ROUTES,
-  ...typeof AGENT_BUILDER_ROUTES,
   ...typeof WORKSPACE_ROUTES,
   ...typeof LEGACY_ROUTES,
   ...typeof MCP_ROUTES,
@@ -230,7 +225,6 @@ export type ServerRoutes = readonly [
   ...typeof PROCESSOR_PROVIDER_ROUTES,
   ...typeof SYSTEM_ROUTES,
   ...typeof DATASETS_ROUTES,
-  ...typeof EDITOR_BUILDER_ROUTES,
   ...typeof CHANNELS_ROUTES,
 ];
 
