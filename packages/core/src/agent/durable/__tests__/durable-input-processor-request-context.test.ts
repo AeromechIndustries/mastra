@@ -14,7 +14,7 @@ import type { LanguageModelV2 } from '@ai-sdk/provider-v5';
 import { MockLanguageModelV2, convertArrayToReadableStream } from '@internal/ai-sdk-v5/test';
 import { describe, it, expect } from 'vitest';
 import type { Processor } from '../../../processors';
-import { RequestContext, MASTRA_VERSIONS_KEY } from '../../../request-context';
+import { RequestContext, MASTRA_AUTH_TOKEN_KEY, MASTRA_VERSIONS_KEY } from '../../../request-context';
 import { Agent } from '../../agent';
 import { prepareForDurableExecution } from '../preparation';
 
@@ -40,6 +40,31 @@ function getRequestContextEntries(workflowInput: unknown): Record<string, unknow
 }
 
 describe('DurableAgent input processor requestContext writes (#23904)', () => {
+  it('uses an application projection and still strips framework credentials', async () => {
+    const baseAgent = new Agent({
+      id: 'projected-context-agent',
+      name: 'Projected Context Agent',
+      instructions: 'You are a helpful assistant.',
+      model: createTextModel('ok') as LanguageModelV2,
+    });
+    const requestContext = new RequestContext();
+    requestContext.set('tenantId', 'tenant-1');
+    requestContext.set('secret', 'do-not-save');
+    requestContext.set(MASTRA_AUTH_TOKEN_KEY, 'do-not-save');
+
+    const result = await prepareForDurableExecution({
+      agent: baseAgent,
+      messages: 'Hello',
+      requestContext,
+      snapshotRequestContext: context => ({
+        tenantId: context.get('tenantId'),
+        [MASTRA_AUTH_TOKEN_KEY]: context.get(MASTRA_AUTH_TOKEN_KEY),
+      }),
+    });
+
+    expect(getRequestContextEntries(result.workflowInput)).toEqual({ tenantId: 'tenant-1' });
+  });
+
   it('persists input processor requestContext writes into the workflow input', async () => {
     const routingProcessor: Processor = {
       id: 'route-pin',

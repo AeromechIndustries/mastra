@@ -4,6 +4,14 @@ For Aeromech Industries fork maintenance, follow [MAINTENANCE.md](MAINTENANCE.md
 It owns downstream branches, publication and integration bookkeeping. Apply the
 upstream package guidance below when working on the corresponding source.
 
+This fork is the sole source owner for Aeromech Mastra adaptations. Make those
+changes in source on an issue branch and merge them to `master`; never create or
+refresh compiled-package patches in TessarAct. TessarAct and every TessarAct
+edition must consume one exact accepted commit from this fork's `master`.
+Feature-branch consumption is permitted only under an explicit integration
+issue and must be removed before release. Do not publish an Aeromech package
+until `pnpm check:aeromech-release` passes against its packed contents.
+
 Unless asked, don't inspect reference or modify examples.
 Use the most-specific `AGENTS.md`; for package work, read `packages/<name>/AGENTS.md` first.
 

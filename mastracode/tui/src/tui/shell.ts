@@ -16,6 +16,15 @@ export async function handleShellPassthrough(state: TUIState, command: string): 
     return;
   }
 
+  if (state.options.managedHost) {
+    try {
+      showInfo(state, await state.options.managedHost.submitShell(command));
+    } catch (error) {
+      showError(state, error instanceof Error ? error.message : 'Managed shell request failed');
+    }
+    return;
+  }
+
   const component = new ShellStreamComponent(command);
   if (state.toolOutputExpanded) {
     component.setExpanded(true);

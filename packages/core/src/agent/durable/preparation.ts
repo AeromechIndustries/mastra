@@ -65,8 +65,18 @@ import { isJsonSafe } from './workflows/shared/schemas';
  */
 function snapshotRequestContextEntries(
   requestContext: RequestContext | undefined,
+  project?: (context: RequestContext) => Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   if (!requestContext) return undefined;
+  if (project) {
+    const json = boundedStringify(project(requestContext));
+    if (json === undefined) return undefined;
+    const projected = JSON.parse(json) as Record<string, unknown>;
+    delete projected[MASTRA_AUTH_TOKEN_KEY];
+    delete projected[MASTRA_INHERITED_MEMORY_KEY];
+    delete projected['MastraMemory'];
+    return Object.keys(projected).length > 0 ? projected : undefined;
+  }
   const out: Record<string, unknown> = {};
   let any = false;
   for (const [key, value] of requestContext.entries()) {
@@ -241,6 +251,8 @@ export interface PreparationOptions<OUTPUT = undefined> {
    * Falls back to `agent.name` if not provided.
    */
   durableAgentName?: string;
+  /** Application projection for the JSON-safe request context saved with a durable run. */
+  snapshotRequestContext?: (context: RequestContext) => Record<string, unknown>;
 }
 
 /**
@@ -273,6 +285,7 @@ export async function prepareForDurableExecution<OUTPUT = undefined>(
     methodType = 'stream',
     durableAgentId,
     durableAgentName,
+    snapshotRequestContext,
   } = options;
 
   // Public-facing identity: use the durable wrapper's ID/name for all
@@ -585,7 +598,7 @@ export async function prepareForDurableExecution<OUTPUT = undefined>(
   // snapshotRequestContextEntries; the versions entry is pinned back to the
   // caller's own value (captured at step 3, before the merge) so persisted
   // input still reflects only caller intent.
-  let requestContextEntriesSnapshot = snapshotRequestContextEntries(requestContext);
+  let requestContextEntriesSnapshot = snapshotRequestContextEntries(requestContext, snapshotRequestContext);
   if (requestVersions !== undefined) {
     const requestVersionsJson = boundedStringify(requestVersions);
     if (requestVersionsJson !== undefined) {

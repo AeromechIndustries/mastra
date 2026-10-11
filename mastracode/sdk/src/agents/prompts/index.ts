@@ -33,6 +33,11 @@ export interface PromptContext extends Omit<BasePromptContext, 'toolGuidance'> {
   hostInstructions?: string;
   currentDate: string;
   workingDir: string;
+  /** Host-owned guidance that bypasses local settings and instruction discovery. */
+  managed?: {
+    toolGuidance: string;
+    modePrompt: string;
+  };
 }
 
 const modePrompts: Record<string, string | ((ctx: PromptContext) => string)> = {
@@ -84,6 +89,29 @@ export function buildFullPrompt(ctx: PromptContext): string {
  * these, so the two can never disagree about what the model receives.
  */
 export function buildFullPromptSections(ctx: PromptContext): PromptSection[] {
+  if (ctx.managed) {
+    const base = buildBasePrompt({
+      projectPath: ctx.workingDir,
+      projectName: ctx.projectName,
+      gitBranch: ctx.gitBranch,
+      platform: process.platform,
+      commonBinaries: ctx.commonBinaries,
+      date: ctx.currentDate,
+      mode: ctx.modeId,
+      modelId: ctx.modelId,
+      coAuthorName: ctx.coAuthorName,
+      coAuthorEmail: ctx.coAuthorEmail,
+      activePlan: ctx.state?.activePlan,
+      hasSubagents: ctx.hasSubagents,
+      toolGuidance: ctx.managed.toolGuidance,
+    });
+    return [
+      { id: 'base-prompt', label: 'Base system prompt', content: base },
+      { id: 'host-instructions', label: 'Host instructions', content: ctx.hostInstructions?.trim() ?? '' },
+      { id: 'mode-prompt', label: 'Managed mode prompt', content: ctx.managed.modePrompt.trim() },
+    ].filter(section => Boolean(section.content));
+  }
+
   // Determine whether web search tools are available
   const modelId = ctx.modelId;
   const hasWebSearch =

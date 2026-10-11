@@ -294,6 +294,8 @@ export interface DurableAgentStreamOptions<OUTPUT = undefined> {
    * ```
    */
   untilIdle?: boolean | { maxIdleMs?: number };
+  /** Application acknowledgment for a background result already incorporated into a saved turn. */
+  isBackgroundTaskResultConsumed?: (taskId: string) => boolean | Promise<boolean>;
   /** When true, the in-loop background task check step skips waiting (streamUntilIdle sets this) */
   _skipBgTaskWait?: boolean;
   /**
@@ -450,6 +452,20 @@ export interface DurableAgentConfig<
    * regardless of this option.
    */
   shouldCache?: (topic: string) => boolean;
+
+  /** Application projection for the JSON-safe request context saved with a durable run. */
+  snapshotRequestContext?: (context: RequestContext) => Record<string, unknown>;
+
+  /** Reauthorizes and rebuilds call-time bindings before a cold recovery or resume. */
+  rehydrateExecution?: (input: {
+    runId: string;
+    agentId: string;
+    operation: 'recover' | 'resume';
+    requestContextEntries?: Record<string, unknown>;
+  }) => Promise<AgentExecutionOptions<TOutput> & { requestContext: RequestContext }>;
+
+  /** Cooperative pause policy evaluated at durable execution boundaries. */
+  executionCheckpoint?: import('./workflows/durable-loop-builder').DurableExecutionCheckpoint;
 }
 
 /**
@@ -664,6 +680,10 @@ export class DurableAgent<
    */
   protected readonly userShouldPersistSnapshot: ShouldPersistSnapshotFn | undefined;
 
+  readonly #snapshotRequestContext: DurableAgentConfig<TAgentId, TTools, TOutput>['snapshotRequestContext'];
+  readonly #rehydrateExecution: DurableAgentConfig<TAgentId, TTools, TOutput>['rehydrateExecution'];
+  readonly #executionCheckpoint: DurableAgentConfig<TAgentId, TTools, TOutput>['executionCheckpoint'];
+
   /** Whether the one-time persistence-policy guardrail warnings have run */
   #warnedPersistencePolicy = false;
 
@@ -681,6 +701,9 @@ export class DurableAgent<
       cleanupTimeoutMs,
       shouldCache,
       shouldPersistSnapshot,
+      snapshotRequestContext,
+      rehydrateExecution,
+      executionCheckpoint,
     } = config;
 
     // Use provided id/name or fall back to agent.id/agent.name
@@ -706,6 +729,9 @@ export class DurableAgent<
     this.#cleanupTimeoutMs = cleanupTimeoutMs ?? 30_000;
     this.#shouldCache = shouldCache;
     this.userShouldPersistSnapshot = shouldPersistSnapshot;
+    this.#snapshotRequestContext = snapshotRequestContext;
+    this.#rehydrateExecution = rehydrateExecution;
+    this.#executionCheckpoint = executionCheckpoint;
   }
 
   // ===========================================================================
@@ -1188,9 +1214,24 @@ export class DurableAgent<
     recoveryLease: RecoveryLease;
     originalSpansEnded: boolean;
   }): Promise<RehydratedRecoveryState> {
-    const requestContext: RequestContext = workflowInput.requestContextEntries
-      ? new RequestContext(Object.entries(workflowInput.requestContextEntries) as Iterable<readonly [string, unknown]>)
-      : new RequestContext();
+    const rehydratedOptions = this.#rehydrateExecution
+      ? await this.#rehydrateExecution({
+          runId,
+          agentId: this.id,
+          operation: 'recover',
+          requestContextEntries: workflowInput.requestContextEntries,
+        })
+      : undefined;
+    if (this.#rehydrateExecution && !rehydratedOptions?.requestContext) {
+      throw new Error('Durable execution rehydration requires a freshly authorized request context');
+    }
+    const requestContext: RequestContext = rehydratedOptions?.requestContext
+      ? rehydratedOptions.requestContext
+      : workflowInput.requestContextEntries
+        ? new RequestContext(
+            Object.entries(workflowInput.requestContextEntries) as Iterable<readonly [string, unknown]>,
+          )
+        : new RequestContext();
 
     const messageListMemoryInfo = (
       workflowInput.messageListState as { memoryInfo?: { threadId?: string; resourceId?: string } } | undefined
@@ -1287,6 +1328,26 @@ export class DurableAgent<
     }
     recoveryLease.assertOwned();
 
+    const tools = rehydratedOptions
+      ? await wrapped.getToolsForExecution({
+          toolsets: rehydratedOptions.toolsets,
+          clientTools: rehydratedOptions.clientTools,
+          threadId,
+          resourceId,
+          runId,
+          requestContext,
+          memoryConfig: rehydratedOptions.memory?.options,
+          autoResumeSuspendedTools: rehydratedOptions.autoResumeSuspendedTools,
+          hooks: rehydratedOptions.hooks,
+          delegation: rehydratedOptions.delegation,
+          methodType: 'stream',
+          backgroundTaskEnabled: Boolean(backgroundTaskManager),
+          backgroundTaskPolicy: rehydratedOptions.backgroundTaskPolicy,
+          model,
+        })
+      : undefined;
+    recoveryLease.assertOwned();
+
     const processorStates = new Map<string, any>();
     const origAgentSpanData = workflowInput.agentSpanData as ExportedSpan<SpanType.AGENT_RUN> | undefined;
     const origModelSpanData = workflowInput.modelSpanData as ExportedSpan<SpanType.MODEL_GENERATION> | undefined;
@@ -1353,6 +1414,22 @@ export class DurableAgent<
       mastra: this.#mastra,
       model,
       modelList,
+      ...(tools
+        ? {
+            tools: rehydratedOptions?.activeTools
+              ? Object.fromEntries(
+                  Object.entries(tools).filter(([name]) => rehydratedOptions.activeTools?.includes(name)),
+                )
+              : tools,
+            authorizedToolsOnly: true,
+            workspace: await wrapped.getWorkspace({ requestContext }),
+            requireToolApproval: rehydratedOptions?.requireToolApproval,
+            stopWhen: rehydratedOptions?.stopWhen,
+            prepareStep: rehydratedOptions?.prepareStep,
+            isTaskComplete: rehydratedOptions?.isTaskComplete,
+            goal: wrapped.__getGoalConfig(),
+          }
+        : {}),
       memory,
       saveQueueManager,
       requestContext,
@@ -1855,6 +1932,9 @@ export class DurableAgent<
       cleanupTimeoutMs: this.#cleanupTimeoutMs,
       shouldCache: this.#shouldCache,
       shouldPersistSnapshot: this.userShouldPersistSnapshot,
+      snapshotRequestContext: this.#snapshotRequestContext,
+      rehydrateExecution: this.#rehydrateExecution,
+      executionCheckpoint: this.#executionCheckpoint,
     });
 
     // Preserve runtime state set after construction (mastra registration and the
@@ -2040,6 +2120,7 @@ export class DurableAgent<
       // in-process engine (see resolveWorkflowEngine).
       engine: this.resolveWorkflowEngine(),
       shouldPersistSnapshot: this.resolveShouldPersistSnapshot(),
+      executionCheckpoint: this.#executionCheckpoint,
     });
   }
 
@@ -2334,6 +2415,7 @@ export class DurableAgent<
       mastra: this.#mastra,
       durableAgentId: this.id,
       durableAgentName: this.name,
+      snapshotRequestContext: this.#snapshotRequestContext,
     });
 
     const { runId, messageId, workflowInput, registryEntry, messageList, threadId, resourceId } = preparation;
@@ -2621,6 +2703,17 @@ export class DurableAgent<
       )?.memoryInfo;
       const threadId = workflowInput.state?.threadId ?? messageListMemoryInfo?.threadId;
       const resourceId = workflowInput.state?.resourceId ?? messageListMemoryInfo?.resourceId;
+      const rehydratedOptions = this.#rehydrateExecution
+        ? await this.#rehydrateExecution({
+            runId,
+            agentId: this.id,
+            operation: 'resume',
+            requestContextEntries: workflowInput.requestContextEntries,
+          })
+        : undefined;
+      if (this.#rehydrateExecution && !rehydratedOptions?.requestContext) {
+        throw new Error('Durable execution rehydration requires a freshly authorized request context');
+      }
       const snapshotRequestContext = workflowInput.requestContextEntries
         ? new RequestContext<unknown>(Object.entries(workflowInput.requestContextEntries))
         : undefined;
@@ -2633,9 +2726,10 @@ export class DurableAgent<
         : options?.memory;
 
       await this.prepare([], {
+        ...(rehydratedOptions as AgentExecutionOptions<TOutput>),
         ...(options as AgentExecutionOptions<TOutput>),
         runId,
-        requestContext: options?.requestContext ?? snapshotRequestContext,
+        requestContext: options?.requestContext ?? rehydratedOptions?.requestContext ?? snapshotRequestContext,
         memory,
         // Restore the original run's flag from the persisted snapshot so a
         // cross-process resume still returns scoringData; caller override wins.

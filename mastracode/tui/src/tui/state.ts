@@ -187,6 +187,16 @@ export interface MastraTUIOptions {
 
   /** Process adapter exit hook. Defaults to process.exit. */
   exit?: (exitCode: number) => void;
+
+  /** Application-owned controls for an embedded terminal surface. */
+  managedHost?: {
+    projectInfo: ProjectInfo;
+    autocompleteProvider?: CombinedAutocompleteProvider;
+    dispatchSlashCommand(input: string): Promise<string>;
+    submitShell(command: string): Promise<string>;
+    onReady?(): void;
+    readPlanFile?(path: string): Promise<{ title: string; plan: string } | undefined>;
+  };
 }
 
 // =============================================================================
@@ -392,6 +402,9 @@ export interface TUIState {
  * and sets all mutable fields to their defaults.
  */
 export function createTUIState(options: MastraTUIOptions): TUIState {
+  if (options.managedHost && !options.terminal) {
+    throw new Error('Managed embedding requires an injected terminal.');
+  }
   const terminal = options.terminal ?? new ProcessTerminal();
   if (!options.terminal) {
     Object.defineProperty(terminal, 'columns', { get: getTermWidth });
@@ -479,7 +492,7 @@ export function createTUIState(options: MastraTUIOptions): TUIState {
     pendingApprovalDismiss: null,
 
     // Status line
-    projectInfo: detectProject(process.cwd()),
+    projectInfo: options.managedHost?.projectInfo ?? detectProject(process.cwd()),
     modelAuthStatus: { hasAuth: true },
     githubPrPollingActive: false,
 
@@ -512,6 +525,12 @@ export function createTUIState(options: MastraTUIOptions): TUIState {
     const color = result.session.mode.resolve()?.metadata?.color;
     return typeof color === 'string' ? color : undefined;
   };
+
+  if (options.managedHost) {
+    if (options.managedHost.autocompleteProvider)
+      editor.setAutocompleteProvider(options.managedHost.autocompleteProvider);
+    return result;
+  }
 
   const voiceSettings = loadSettings().voice;
   result.voiceController = new VoiceController({

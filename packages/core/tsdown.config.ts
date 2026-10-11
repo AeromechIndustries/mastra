@@ -3,8 +3,10 @@ import path from 'node:path';
 import * as babel from '@babel/core';
 import { generateTypes } from '@internal/types-builder';
 import { defineConfig } from 'tsdown';
+import { openOnlyBuildPlugin } from '../../downstream/open-only-build-plugin.mjs';
 
 const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'package.json'), 'utf-8'));
+const openOnly = process.env.AEROMECH_OPEN_ONLY === '1';
 const { default: treeshakeDecoratorsBabelPlugin } = await import(
   new URL('./tools/treeshake-decorators.js', import.meta.url).href
 );
@@ -67,6 +69,7 @@ export default defineConfig({
     'src/utils.ts',
     '!src/action/index.ts',
     'src/*/index.ts',
+    ...(openOnly ? ['!src/license/index.ts', 'src/license/open-only.ts'] : []),
     'src/observability/context-storage.ts',
     'src/tools/is-vercel-tool.ts',
     'src/workflows/constants.ts',
@@ -86,9 +89,9 @@ export default defineConfig({
     'src/evals/scoreTraces/index.ts',
     'src/agent/message-list/index.ts',
     'src/agent/durable/index.ts',
-    'src/auth/ee/index.ts',
-    'src/auth/ee/fga-check.ts',
-    'src/agent-builder/ee/index.ts',
+    ...(openOnly
+      ? ['src/auth/open-only.ts', 'src/agent-builder/open-only.ts']
+      : ['src/auth/ee/index.ts', 'src/auth/ee/fga-check.ts', 'src/agent-builder/ee/index.ts']),
     'src/storage/domains/agents/index.ts',
     'src/storage/domains/mcp-clients/index.ts',
     'src/storage/domains/mcp-servers/index.ts',
@@ -105,12 +108,13 @@ export default defineConfig({
   dts: false,
   treeshake: true,
   inputOptions: {
-    plugins: [treeshakeDecorators, dropBareBuiltinImports],
+    plugins: [...(openOnly ? [openOnlyBuildPlugin()] : []), treeshakeDecorators, dropBareBuiltinImports],
   },
   define: {
     __MASTRA_VERSION__: JSON.stringify(pkg.version),
+    ...(openOnly ? { 'process.env.AEROMECH_OPEN_ONLY': JSON.stringify('1') } : {}),
   },
-  sourcemap: true,
+  sourcemap: !openOnly,
   deps: {
     neverBundle: ['vite', 'vitest'],
     alwaysBundle: [
@@ -143,6 +147,7 @@ export default defineConfig({
         '@sindresorhus/slugify',
       ]),
       {
+        noCheck: openOnly,
         rollupTypes: {
           'tools/mcp-types.d.ts': ['@modelcontextprotocol/server', '@modelcontextprotocol/core'],
         },

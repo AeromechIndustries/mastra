@@ -54,6 +54,7 @@ export class LSPManager {
   private customExtensions: Record<string, string>;
   private filesystem?: {
     exists(path: string): Promise<boolean>;
+    readFile?(path: string, options?: { encoding?: string }): Promise<string | Uint8Array>;
   };
 
   constructor(
@@ -62,6 +63,7 @@ export class LSPManager {
     config: LSPConfig = {},
     filesystem?: {
       exists(path: string): Promise<boolean>;
+      readFile?(path: string, options?: { encoding?: string }): Promise<string | Uint8Array>;
     },
   ) {
     if (
@@ -428,10 +430,15 @@ export class LSPManager {
 
     try {
       // Open the file (content doesn't matter for position queries, but server may need it)
-      const fs = await import('node:fs/promises');
       let content = '';
       try {
-        content = await fs.readFile(filePath, 'utf-8');
+        if (this.filesystem?.readFile) {
+          const remoteContent = await this.filesystem.readFile(filePath, { encoding: 'utf-8' });
+          content = typeof remoteContent === 'string' ? remoteContent : new TextDecoder().decode(remoteContent);
+        } else {
+          const fs = await import('node:fs/promises');
+          content = await fs.readFile(filePath, 'utf-8');
+        }
       } catch {
         content = '';
       }

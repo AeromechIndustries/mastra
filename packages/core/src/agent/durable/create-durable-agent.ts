@@ -96,6 +96,9 @@ export interface CreateDurableAgentOptions<
    * regardless of this option.
    */
   shouldCache?: (topic: string) => boolean;
+  snapshotRequestContext?: DurableAgentConfig<TAgentId, TTools, TOutput>['snapshotRequestContext'];
+  rehydrateExecution?: DurableAgentConfig<TAgentId, TTools, TOutput>['rehydrateExecution'];
+  executionCheckpoint?: DurableAgentConfig<TAgentId, TTools, TOutput>['executionCheckpoint'];
 }
 
 /**
@@ -143,7 +146,20 @@ export function createDurableAgent<
   TTools extends Record<string, any> = Record<string, any>,
   TOutput = undefined,
 >(options: CreateDurableAgentOptions<TAgentId, TTools, TOutput>): DurableAgent<TAgentId, TTools, TOutput> {
-  const { agent, id, name, cache, pubsub, maxSteps, cleanupTimeoutMs, shouldCache, shouldPersistSnapshot } = options;
+  const {
+    agent,
+    id,
+    name,
+    cache,
+    pubsub,
+    maxSteps,
+    cleanupTimeoutMs,
+    shouldCache,
+    shouldPersistSnapshot,
+    snapshotRequestContext,
+    rehydrateExecution,
+    executionCheckpoint,
+  } = options;
 
   return new DurableAgent({
     agent,
@@ -155,6 +171,9 @@ export function createDurableAgent<
     cleanupTimeoutMs,
     shouldCache,
     shouldPersistSnapshot,
+    snapshotRequestContext,
+    rehydrateExecution,
+    executionCheckpoint,
   } as DurableAgentConfig<TAgentId, TTools, TOutput>);
 }
 

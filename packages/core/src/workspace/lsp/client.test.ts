@@ -121,6 +121,107 @@ setTimeout(() => process.exit(0), 15000).unref();
 setInterval(() => {}, 1000);
 `;
 
+const QUERY_SERVER_SCRIPT = `
+let buf = Buffer.alloc(0);
+function send(payload) {
+  const body = JSON.stringify(payload);
+  process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\\r\\n\\r\\n' + body);
+}
+process.stdin.on('data', chunk => {
+  buf = Buffer.concat([buf, chunk]);
+  for (;;) {
+    const headerEnd = buf.indexOf('\\r\\n\\r\\n');
+    if (headerEnd === -1) return;
+    const match = buf.subarray(0, headerEnd).toString('utf8').match(/Content-Length: (\\d+)/);
+    if (!match) return;
+    const bodyStart = headerEnd + 4;
+    const length = Number(match[1]);
+    if (buf.length < bodyStart + length) return;
+    const msg = JSON.parse(buf.subarray(bodyStart, bodyStart + length).toString('utf8'));
+    buf = buf.subarray(bodyStart + length);
+    if (msg.method === 'initialize') {
+      send({ jsonrpc: '2.0', id: msg.id, result: { capabilities: {
+        referencesProvider: true, documentSymbolProvider: true, workspaceSymbolProvider: true, callHierarchyProvider: true,
+      } } });
+    } else if (msg.id !== undefined) {
+      send({ jsonrpc: '2.0', id: msg.id, result: [{ method: msg.method, params: msg.params }] });
+    }
+  }
+});
+setTimeout(() => process.exit(0), 15000).unref();
+setInterval(() => {}, 1000);
+`;
+
+describe('LSPClient — code intelligence queries', () => {
+  let dir: string;
+  let sandbox: LocalSandbox;
+  let client: LSPClient;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'lsp-query-test-'));
+    sandbox = new LocalSandbox({ workingDirectory: dir });
+    await sandbox.start();
+    const scriptPath = path.join(dir, 'fake-query-server.cjs');
+    await writeFile(scriptPath, QUERY_SERVER_SCRIPT, 'utf8');
+    client = new LSPClient(
+      {
+        id: 'query',
+        name: 'Query LSP',
+        languageIds: ['typescript'],
+        markers: [],
+        command: () => `node "${scriptPath}"`,
+      },
+      dir,
+      sandbox.processes,
+    );
+    await client.initialize(5000);
+  });
+
+  afterEach(async () => {
+    await client.shutdown().catch(() => {});
+    await sandbox.stop().catch(() => {});
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('retains capabilities and forwards reference, symbol, and call hierarchy requests', async () => {
+    const uri = 'file:///project/app.ts';
+    const position = { line: 2, character: 4 };
+    expect(client.supports('references')).toBe(true);
+    expect(client.supports('definition')).toBe(false);
+    expect(client.capabilities).toMatchObject({ callHierarchyProvider: true });
+
+    const results = await Promise.all([
+      client.queryReferences(uri, position, false),
+      client.queryDocumentSymbols(uri),
+      client.queryWorkspaceSymbols('Widget'),
+      client.queryCallHierarchyPrepare(uri, position),
+      client.queryIncomingCalls({
+        name: 'f',
+        kind: 12,
+        uri,
+        range: { start: position, end: position },
+        selectionRange: { start: position, end: position },
+      }),
+      client.queryOutgoingCalls({
+        name: 'f',
+        kind: 12,
+        uri,
+        range: { start: position, end: position },
+        selectionRange: { start: position, end: position },
+      }),
+    ]);
+
+    expect(results.map(result => (result[0] as any).method)).toEqual([
+      'textDocument/references',
+      'textDocument/documentSymbol',
+      'workspace/symbol',
+      'textDocument/prepareCallHierarchy',
+      'callHierarchy/incomingCalls',
+      'callHierarchy/outgoingCalls',
+    ]);
+  }, 20000);
+});
+
 describe('LSPClient — pull diagnostics (TS 7+ style server)', () => {
   let dir: string;
   let sandbox: LocalSandbox;

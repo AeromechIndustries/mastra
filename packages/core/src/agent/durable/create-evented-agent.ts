@@ -87,6 +87,9 @@ export interface CreateEventedAgentOptions<
    * multi-worker coordination build on.
    */
   shouldPersistSnapshot?: ShouldPersistSnapshotFn;
+  snapshotRequestContext?: EventedAgentConfig<TAgentId, TTools, TOutput>['snapshotRequestContext'];
+  rehydrateExecution?: EventedAgentConfig<TAgentId, TTools, TOutput>['rehydrateExecution'];
+  executionCheckpoint?: EventedAgentConfig<TAgentId, TTools, TOutput>['executionCheckpoint'];
 }
 
 /**
@@ -120,7 +123,17 @@ export function createEventedAgent<
   TTools extends Record<string, any> = Record<string, any>,
   TOutput = undefined,
 >(options: CreateEventedAgentOptions<TAgentId, TTools, TOutput>): EventedAgent<TAgentId, TTools, TOutput> {
-  const { agent, pubsub, cache, maxSteps, shouldCache, shouldPersistSnapshot } = options;
+  const {
+    agent,
+    pubsub,
+    cache,
+    maxSteps,
+    shouldCache,
+    shouldPersistSnapshot,
+    snapshotRequestContext,
+    rehydrateExecution,
+    executionCheckpoint,
+  } = options;
 
   return new EventedAgent({
     agent,
@@ -129,6 +142,9 @@ export function createEventedAgent<
     maxSteps,
     shouldCache,
     shouldPersistSnapshot,
+    snapshotRequestContext,
+    rehydrateExecution,
+    executionCheckpoint,
   } as EventedAgentConfig<TAgentId, TTools, TOutput>);
 }
 

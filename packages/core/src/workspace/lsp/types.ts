@@ -141,6 +141,74 @@ export interface LSPDiagnostic {
   source?: string;
 }
 
+export interface LSPPosition {
+  line: number;
+  character: number;
+}
+
+export interface LSPRange {
+  start: LSPPosition;
+  end: LSPPosition;
+}
+
+export interface LSPLocation {
+  uri: string;
+  range: LSPRange;
+}
+
+export interface LSPLocationLink {
+  targetUri: string;
+  targetRange: LSPRange;
+  targetSelectionRange: LSPRange;
+  originSelectionRange?: LSPRange;
+}
+
+export interface LSPDocumentSymbol {
+  name: string;
+  kind: number;
+  range: LSPRange;
+  selectionRange: LSPRange;
+  detail?: string;
+  children?: LSPDocumentSymbol[];
+}
+
+export interface LSPWorkspaceSymbol {
+  name: string;
+  kind: number;
+  location: LSPLocation | { uri: string };
+  containerName?: string;
+}
+
+export interface LSPCallHierarchyItem {
+  name: string;
+  kind: number;
+  uri: string;
+  range: LSPRange;
+  selectionRange: LSPRange;
+  detail?: string;
+  data?: unknown;
+}
+
+export interface LSPIncomingCall {
+  from: LSPCallHierarchyItem;
+  fromRanges: LSPRange[];
+}
+
+export interface LSPOutgoingCall {
+  to: LSPCallHierarchyItem;
+  fromRanges: LSPRange[];
+}
+
+export type LSPOperation =
+  | 'hover'
+  | 'definition'
+  | 'typeDefinition'
+  | 'implementation'
+  | 'references'
+  | 'documentSymbols'
+  | 'workspaceSymbols'
+  | 'callHierarchy';
+
 // =============================================================================
 // Server Definitions
 // =============================================================================

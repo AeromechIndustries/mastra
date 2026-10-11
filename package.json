@@ -36,6 +36,9 @@
   "private": true,
   "scripts": {
     "changeset": "pnpm --filter @internal/changeset-cli start",
+    "check:aeromech-release": "node downstream/check-release-boundary.mjs",
+    "build:aeromech-open": "AEROMECH_OPEN_ONLY=1 pnpm --filter @internal/auth build && AEROMECH_OPEN_ONLY=1 pnpm --filter @mastra/core build:lib && AEROMECH_OPEN_ONLY=1 pnpm --filter @mastra/editor build && pnpm --filter @mastra/pg build:lib && pnpm --filter @mastra/code-sdk build:lib && pnpm --filter mastracode build:lib && node downstream/sanitize-open-output.mjs packages/_internals/auth/dist packages/core/dist packages/editor/dist && node downstream/check-release-boundary.mjs packages/_internals/auth/dist packages/core/dist packages/editor/dist",
+    "pack:aeromech-open": "pnpm build:aeromech-open && node downstream/pack-open-packages.mjs && node downstream/check-release-boundary.mjs downstream/artifacts/*.tgz",
     "changeset-cli": "changeset",
     "check:core-imports": "tsx scripts/check-core-imports.ts",
     "ci:publish": "pnpm publish -r",

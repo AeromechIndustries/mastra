@@ -13,7 +13,18 @@ import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import type { ProcessHandle, SandboxProcessManager } from '../sandbox/process-manager';
-import type { LSPServerDef } from './types';
+import type {
+  LSPCallHierarchyItem,
+  LSPDocumentSymbol,
+  LSPIncomingCall,
+  LSPLocation,
+  LSPLocationLink,
+  LSPOperation,
+  LSPOutgoingCall,
+  LSPPosition,
+  LSPServerDef,
+  LSPWorkspaceSymbol,
+} from './types';
 
 // =============================================================================
 // Dynamic Import
@@ -157,6 +168,7 @@ export class LSPClient {
   private diagnostics: Map<string, any[]> = new Map();
   private initializationOptions: Record<string, unknown> | null = null;
   private supportsPullDiagnostics: boolean = false;
+  private serverCapabilities: Record<string, unknown> = {};
 
   constructor(serverDef: LSPServerDef, workspaceRoot: string, processManager: SandboxProcessManager) {
     this.serverDef = serverDef;
@@ -172,6 +184,25 @@ export class LSPClient {
   /** Name of the LSP server. */
   get serverName(): string {
     return this.serverDef.name;
+  }
+
+  /** Capabilities returned by this server during initialization. */
+  get capabilities(): Readonly<Record<string, unknown>> {
+    return this.serverCapabilities;
+  }
+
+  supports(operation: LSPOperation): boolean {
+    const capability = {
+      hover: 'hoverProvider',
+      definition: 'definitionProvider',
+      typeDefinition: 'typeDefinitionProvider',
+      implementation: 'implementationProvider',
+      references: 'referencesProvider',
+      documentSymbols: 'documentSymbolProvider',
+      workspaceSymbols: 'workspaceSymbolProvider',
+      callHierarchy: 'callHierarchyProvider',
+    } satisfies Record<LSPOperation, string>;
+    return Boolean(this.serverCapabilities[capability[operation]]);
   }
 
   /**
@@ -228,7 +259,7 @@ export class LSPClient {
       ],
       capabilities: {
         window: { workDoneProgress: true },
-        workspace: { configuration: true },
+        workspace: { configuration: true, symbol: { dynamicRegistration: false } },
         textDocument: {
           publishDiagnostics: {
             relatedInformation: true,
@@ -257,6 +288,7 @@ export class LSPClient {
           typeDefinition: { dynamicRegistration: false, linkSupport: true },
           implementation: { dynamicRegistration: false, linkSupport: true },
           references: { dynamicRegistration: false },
+          callHierarchy: { dynamicRegistration: false },
           documentHighlight: { dynamicRegistration: false },
           documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: true },
           codeAction: {
@@ -304,10 +336,8 @@ export class LSPClient {
       }),
     ]).finally(() => clearTimeout(initTimer!));
 
-    // Detect pull diagnostics support (TS 7+ native LSP uses this instead of push)
-    if (initResult?.capabilities?.diagnosticProvider) {
-      this.supportsPullDiagnostics = true;
-    }
+    this.serverCapabilities = initResult?.capabilities ?? {};
+    this.supportsPullDiagnostics = Boolean(this.serverCapabilities.diagnosticProvider);
 
     // Send initialized notification
     this.connection.sendNotification('initialized', {});
@@ -443,9 +473,9 @@ export class LSPClient {
    */
   async queryDefinition(
     uri: string,
-    position: { line: number; character: number },
+    position: LSPPosition,
     timeoutMs: number = 5000,
-  ): Promise<any[]> {
+  ): Promise<Array<LSPLocation | LSPLocationLink>> {
     if (!this.connection) return [];
     const result = await withTimeout(
       this.connection.sendRequest('textDocument/definition', { textDocument: { uri }, position }),
@@ -453,7 +483,11 @@ export class LSPClient {
       'Definition request timed out',
     );
     if (!result) return [];
-    return Array.isArray(result) ? result : (result as any).uri ? [result] : [];
+    return Array.isArray(result)
+      ? result
+      : (result as LSPLocation).uri || (result as LSPLocationLink).targetUri
+        ? [result as LSPLocation | LSPLocationLink]
+        : [];
   }
 
   /**
@@ -461,9 +495,9 @@ export class LSPClient {
    */
   async queryTypeDefinition(
     uri: string,
-    position: { line: number; character: number },
+    position: LSPPosition,
     timeoutMs: number = 5000,
-  ): Promise<any[]> {
+  ): Promise<Array<LSPLocation | LSPLocationLink>> {
     if (!this.connection) return [];
     const result = await withTimeout(
       this.connection.sendRequest('textDocument/typeDefinition', { textDocument: { uri }, position }),
@@ -471,7 +505,11 @@ export class LSPClient {
       'Type definition request timed out',
     );
     if (!result) return [];
-    return Array.isArray(result) ? result : (result as any).uri ? [result] : [];
+    return Array.isArray(result)
+      ? result
+      : (result as LSPLocation).uri || (result as LSPLocationLink).targetUri
+        ? [result as LSPLocation | LSPLocationLink]
+        : [];
   }
 
   /**
@@ -479,9 +517,9 @@ export class LSPClient {
    */
   async queryImplementation(
     uri: string,
-    position: { line: number; character: number },
+    position: LSPPosition,
     timeoutMs: number = 5000,
-  ): Promise<any[]> {
+  ): Promise<Array<LSPLocation | LSPLocationLink>> {
     if (!this.connection) return [];
     const result = await withTimeout(
       this.connection.sendRequest('textDocument/implementation', { textDocument: { uri }, position }),
@@ -489,7 +527,87 @@ export class LSPClient {
       'Implementation request timed out',
     );
     if (!result) return [];
-    return Array.isArray(result) ? result : (result as any).uri ? [result] : [];
+    return Array.isArray(result)
+      ? result
+      : (result as LSPLocation).uri || (result as LSPLocationLink).targetUri
+        ? [result as LSPLocation | LSPLocationLink]
+        : [];
+  }
+
+  async queryReferences(
+    uri: string,
+    position: LSPPosition,
+    includeDeclaration: boolean = true,
+    timeoutMs: number = 5000,
+  ): Promise<LSPLocation[]> {
+    if (!this.connection) return [];
+    const result = await withTimeout(
+      this.connection.sendRequest('textDocument/references', {
+        textDocument: { uri },
+        position,
+        context: { includeDeclaration },
+      }),
+      timeoutMs,
+      'References request timed out',
+    );
+    return Array.isArray(result) ? result : [];
+  }
+
+  async queryDocumentSymbols(
+    uri: string,
+    timeoutMs: number = 5000,
+  ): Promise<Array<LSPDocumentSymbol | LSPWorkspaceSymbol>> {
+    if (!this.connection) return [];
+    const result = await withTimeout(
+      this.connection.sendRequest('textDocument/documentSymbol', { textDocument: { uri } }),
+      timeoutMs,
+      'Document symbols request timed out',
+    );
+    return Array.isArray(result) ? result : [];
+  }
+
+  async queryWorkspaceSymbols(query: string, timeoutMs: number = 5000): Promise<LSPWorkspaceSymbol[]> {
+    if (!this.connection) return [];
+    const result = await withTimeout(
+      this.connection.sendRequest('workspace/symbol', { query }),
+      timeoutMs,
+      'Workspace symbols request timed out',
+    );
+    return Array.isArray(result) ? result : [];
+  }
+
+  async queryCallHierarchyPrepare(
+    uri: string,
+    position: LSPPosition,
+    timeoutMs: number = 5000,
+  ): Promise<LSPCallHierarchyItem[]> {
+    if (!this.connection) return [];
+    const result = await withTimeout(
+      this.connection.sendRequest('textDocument/prepareCallHierarchy', { textDocument: { uri }, position }),
+      timeoutMs,
+      'Call hierarchy preparation timed out',
+    );
+    return Array.isArray(result) ? result : [];
+  }
+
+  async queryIncomingCalls(item: LSPCallHierarchyItem, timeoutMs: number = 5000): Promise<LSPIncomingCall[]> {
+    if (!this.connection) return [];
+    const result = await withTimeout(
+      this.connection.sendRequest('callHierarchy/incomingCalls', { item }),
+      timeoutMs,
+      'Incoming calls request timed out',
+    );
+    return Array.isArray(result) ? result : [];
+  }
+
+  async queryOutgoingCalls(item: LSPCallHierarchyItem, timeoutMs: number = 5000): Promise<LSPOutgoingCall[]> {
+    if (!this.connection) return [];
+    const result = await withTimeout(
+      this.connection.sendRequest('callHierarchy/outgoingCalls', { item }),
+      timeoutMs,
+      'Outgoing calls request timed out',
+    );
+    return Array.isArray(result) ? result : [];
   }
 
   /**
