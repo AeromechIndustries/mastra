@@ -19,13 +19,14 @@ import { EventEmitterPubSub } from '../../../events/event-emitter';
 import type { PubSub } from '../../../events/pubsub';
 import { Mastra } from '../../../mastra';
 import type { ObservabilityEntrypoint, ObservabilityInstance } from '../../../observability';
+import { RequestContext } from '../../../request-context';
 import { InMemoryStore } from '../../../storage';
 import type { WorkflowRunState, WorkflowRunStatus } from '../../../workflows/types';
 import { Agent } from '../../agent';
 import { agentThreadStreamRuntime } from '../../thread-stream-runtime';
 import { AGENT_STREAM_TOPIC, AgentStreamEventTypes, DurableStepIds } from '../constants';
 import { createDurableAgent } from '../create-durable-agent';
-import type { DurableAgent } from '../durable-agent';
+import type { DurableAgent, DurableAgentConfig } from '../durable-agent';
 import { globalRunRegistry } from '../run-registry';
 import { emitChunkEvent, emitFinishEvent } from '../stream-adapter';
 import type { SerializableModelListEntry } from '../types';
@@ -81,14 +82,19 @@ function makeMockModel(modelId?: string): LanguageModelV2 {
   }) as unknown as LanguageModelV2;
 }
 
-function createDurableWithStore(agentId: string, store = new InMemoryStore(), pubsub?: PubSub) {
+function createDurableWithStore(
+  agentId: string,
+  store = new InMemoryStore(),
+  pubsub?: PubSub,
+  config: Partial<DurableAgentConfig> = {},
+) {
   const baseAgent = new Agent({
     id: agentId,
     name: agentId,
     instructions: 'x',
     model: makeMockModel(),
   });
-  const agent = createDurableAgent({ agent: baseAgent, pubsub, ...(pubsub ? { cache: false } : {}) });
+  const agent = createDurableAgent({ agent: baseAgent, pubsub, ...(pubsub ? { cache: false } : {}), ...config });
   void new Mastra({
     agents: { [agentId]: agent as any },
     storage: store,
@@ -181,6 +187,38 @@ describe('DurableAgent.recover(runId)', () => {
     expect(entry?.workflowExecution).toBeInstanceOf(Promise);
 
     await entry?.workflowExecution;
+    cleanup();
+  });
+
+  it('reauthorizes recovery and installs only the rebuilt call-time tools', async () => {
+    const rehydrateExecution = vi.fn(async () => ({
+      requestContext: new RequestContext([['authorizedTenant', 'tenant-1']]),
+      activeTools: ['allowedTool'],
+      clientTools: {
+        allowedTool: { description: 'allowed', execute: vi.fn() },
+        deniedTool: { description: 'denied', execute: vi.fn() },
+      },
+    }));
+    ({ agent, store } = createDurableWithStore('agent-A', new InMemoryStore(), undefined, {
+      rehydrateExecution: rehydrateExecution as never,
+    }));
+    await seed(store, 'run-authorized', 'running', 'agent-A', { staleCredential: 'not-reused' });
+    stubWorkflow(agent, 'success');
+
+    const { cleanup } = await agent.recover('run-authorized');
+    const entry = globalRunRegistry.get('run-authorized') as any;
+
+    expect(rehydrateExecution).toHaveBeenCalledWith({
+      runId: 'run-authorized',
+      agentId: 'agent-A',
+      operation: 'recover',
+      requestContextEntries: { staleCredential: 'not-reused' },
+    });
+    expect(entry.requestContext.get('authorizedTenant')).toBe('tenant-1');
+    expect(entry.authorizedToolsOnly).toBe(true);
+    expect(Object.keys(entry.tools)).toEqual(['allowedTool']);
+
+    await entry.workflowExecution;
     cleanup();
   });
 

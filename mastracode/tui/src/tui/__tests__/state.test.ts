@@ -38,6 +38,7 @@ vi.mock('@earendil-works/pi-tui', () => {
 vi.mock('../components/custom-editor.js', () => ({
   CustomEditor: class {
     getModeColor?: () => string | undefined;
+    setAutocompleteProvider = vi.fn();
 
     constructor(
       public ui: unknown,
@@ -77,6 +78,41 @@ function createAgentController(session: ReturnType<typeof createSession>) {
 }
 
 describe('createTUIState', () => {
+  it('requires an injected terminal for managed embedding', () => {
+    const session = createSession();
+    expect(() =>
+      createTUIState({
+        controller: createAgentController(session) as never,
+        session: session as never,
+        managedHost: {
+          projectInfo: { rootPath: '/managed', gitBranch: 'main' },
+          dispatchSlashCommand: vi.fn(),
+          submitShell: vi.fn(),
+        },
+      }),
+    ).toThrow('Managed embedding requires an injected terminal.');
+  });
+
+  it('uses host project information and autocomplete in managed embedding', () => {
+    const session = createSession();
+    const autocompleteProvider = {};
+    const state = createTUIState({
+      controller: createAgentController(session) as never,
+      session: session as never,
+      terminal: { columns: 100 } as never,
+      managedHost: {
+        projectInfo: { rootPath: '/managed', gitBranch: 'host-branch' },
+        autocompleteProvider: autocompleteProvider as never,
+        dispatchSlashCommand: vi.fn(),
+        submitShell: vi.fn(),
+      },
+    });
+
+    expect(state.projectInfo).toEqual({ rootPath: '/managed', gitBranch: 'host-branch' });
+    expect(state.editor.setAutocompleteProvider).toHaveBeenCalledWith(autocompleteProvider);
+    state.renderScheduler?.dispose();
+  });
+
   it('initializes the shared TUI runtime defaults used by chat handlers', () => {
     const session = createSession();
     const controller = createAgentController(session);

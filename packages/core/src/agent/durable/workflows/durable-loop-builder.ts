@@ -83,6 +83,45 @@ export interface DurableAgenticWorkflowOptions {
    * `recovery.durableAgents: 'auto'` is configured.
    */
   shouldPersistSnapshot?: ShouldPersistSnapshotFn;
+  executionCheckpoint?: DurableExecutionCheckpoint;
+}
+
+export type DurableExecutionCheckpoint = (input: {
+  runId: string;
+  agentId: string;
+  phase: 'model' | 'tool' | 'continuation' | 'evaluation';
+  stepIndex: number;
+  toolCallId?: string;
+  requestContext?: unknown;
+}) => { pause?: boolean; reason?: string } | void | Promise<{ pause?: boolean; reason?: string } | void>;
+
+function withDurableExecutionCheckpoint(
+  step: any,
+  phase: Parameters<DurableExecutionCheckpoint>[0]['phase'],
+  checkpoint?: DurableExecutionCheckpoint,
+) {
+  if (!checkpoint) return step;
+  const execute = step.execute;
+  return {
+    ...step,
+    execute: async (params: any) => {
+      const input = params.getInitData();
+      const saved = params.suspendData?.type === 'execution-pause' ? params.suspendData.pending : undefined;
+      const pending = saved ?? { resumeData: params.resumeData, suspendData: params.suspendData };
+      const decision = await checkpoint({
+        runId: input.runId,
+        agentId: input.agentId,
+        phase,
+        stepIndex: params.inputData?.stepIndex ?? input.iterationCount ?? 0,
+        toolCallId: phase === 'tool' ? params.inputData?.toolCallId : undefined,
+        requestContext: params.requestContext,
+      });
+      if (decision?.pause) {
+        return params.suspend({ type: 'execution-pause', reason: decision.reason, phase, pending });
+      }
+      return execute({ ...params, ...pending });
+    },
+  };
 }
 
 /**
@@ -281,12 +320,12 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
   // created once at startup and reused for all runs.
 
   protected override llmExecutionStep() {
-    return createDurableLLMExecutionStep();
+    return withDurableExecutionCheckpoint(createDurableLLMExecutionStep(), 'model', this.#options?.executionCheckpoint);
   }
 
   /** Each tool call runs as its own step with suspend support. */
   protected override toolCallStep() {
-    return createDurableToolCallStep();
+    return withDurableExecutionCheckpoint(createDurableToolCallStep(), 'tool', this.#options?.executionCheckpoint);
   }
 
   protected override llmMappingStep() {
@@ -294,7 +333,11 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
   }
 
   protected override backgroundTaskCheckStep() {
-    return createDurableBackgroundTaskCheckStep();
+    return withDurableExecutionCheckpoint(
+      createDurableBackgroundTaskCheckStep(),
+      'continuation',
+      this.#options?.executionCheckpoint,
+    );
   }
 
   /**
@@ -360,7 +403,11 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
    * so it shows up in workflow traces and produces a proper state transition.
    */
   protected override isTaskCompleteStep() {
-    return createDurableIsTaskCompleteStep(this.#maxSteps);
+    return withDurableExecutionCheckpoint(
+      createDurableIsTaskCompleteStep(this.#maxSteps),
+      'evaluation',
+      this.#options?.executionCheckpoint,
+    );
   }
 
   /**
@@ -369,7 +416,7 @@ export class DurableAgenticLoopBuilder extends AgenticLoopBuilder {
    * already stopped the loop.
    */
   protected override goalStep() {
-    return createDurableGoalStep();
+    return withDurableExecutionCheckpoint(createDurableGoalStep(), 'evaluation', this.#options?.executionCheckpoint);
   }
 
   // ── Composition ────────────────────────────────────────────────────────

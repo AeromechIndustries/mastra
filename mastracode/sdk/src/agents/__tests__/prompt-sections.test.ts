@@ -44,6 +44,22 @@ function makeCtx(overrides: Partial<PromptContext> = {}): PromptContext {
 }
 
 describe('buildFullPromptSections', () => {
+  it('uses only host-supplied sections for managed embedding', () => {
+    const sections = buildFullPromptSections(
+      makeCtx({
+        hostInstructions: 'Use the host policy.',
+        managed: {
+          toolGuidance: 'Only dispatch approved tools.',
+          modePrompt: 'Follow the selected host mode.',
+        },
+      }),
+    );
+
+    expect(sections.map(section => section.id)).toEqual(['base-prompt', 'host-instructions', 'mode-prompt']);
+    expect(joinPromptSections(sections)).toContain('Only dispatch approved tools.');
+    expect(joinPromptSections(sections)).toContain('Follow the selected host mode.');
+  });
+
   // The whole point of the section split is that the audit measures the exact
   // string the model receives. If these two ever disagree, `/context` reports
   // numbers for a prompt that is not being sent.

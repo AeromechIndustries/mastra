@@ -409,6 +409,13 @@ function detectFdPath(): string | null {
 }
 
 export function setupAutocomplete(state: TUIState): void {
+  if (state.options.managedHost) {
+    if (state.options.managedHost.autocompleteProvider) {
+      state.editor.setAutocompleteProvider(state.options.managedHost.autocompleteProvider);
+    }
+    return;
+  }
+
   const slashCommands: SlashCommand[] = [
     { name: 'new', description: 'Start a new thread' },
     { name: 'clone', description: 'Clone the current thread' },

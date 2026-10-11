@@ -309,7 +309,7 @@ async function prepareApprovedPlan(
 
   // Archive the approved plan to the global plans dir so it's findable later. The
   // local plan file is left in place so the user can review every plan made.
-  if (planPath) {
+  if (planPath && !state.options.managedHost) {
     await approvePlanFile({
       planPath,
       title,
@@ -380,7 +380,11 @@ export async function handlePlanApproval(
   // and parse the `# heading` as the title.
   const projectPath = (state.session.state.get() as any)?.projectPath as string | undefined;
   const planPath = submittedPath ? resolvePlanPath(projectPath ?? process.cwd(), submittedPath) : undefined;
-  const current = planPath ? await readPlanFile(planPath) : undefined;
+  const current = state.options.managedHost
+    ? await state.options.managedHost.readPlanFile?.(submittedPath)
+    : planPath
+      ? await readPlanFile(planPath)
+      : undefined;
   if (!current) {
     state.previousPlanSnapshot = undefined;
   }

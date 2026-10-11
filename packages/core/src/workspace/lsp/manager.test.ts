@@ -607,6 +607,18 @@ describe('LSPManager', () => {
       await fsManager.shutdownAll();
     });
 
+    it('opens query documents from the workspace filesystem', async () => {
+      const readFile = vi.fn().mockResolvedValue('export const remote = true;');
+      const fsManager = new LSPManager(mockProcessManager, '/fallback', {}, { ...mockFilesystem, readFile });
+
+      const query = await fsManager.prepareQuery('/project/src/app.ts');
+
+      expect(readFile).toHaveBeenCalledWith('/project/src/app.ts', { encoding: 'utf-8' });
+      expect(mockNotifyOpen).toHaveBeenCalledWith('/project/src/app.ts', 'export const remote = true;', 'typescript');
+      query?.release();
+      await fsManager.shutdownAll();
+    });
+
     it('falls back to sync walkUp when no filesystem provided', async () => {
       const { walkUp, walkUpAsync } = await import('./servers');
       const noFsManager = new LSPManager(mockProcessManager, '/fallback');

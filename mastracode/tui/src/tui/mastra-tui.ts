@@ -263,7 +263,9 @@ export class MastraTUI {
     });
 
     // Load user preferences
-    const savedSettings = loadSettings();
+    const savedSettings = options.managedHost
+      ? { preferences: { quietMode: false, quietModeMaxToolPreviewLines: 2 } }
+      : loadSettings();
     this.state.quietMode = savedSettings.preferences.quietMode;
     this.state.quietModeMaxToolPreviewLines = savedSettings.preferences.quietModeMaxToolPreviewLines;
 
@@ -762,6 +764,24 @@ export class MastraTUI {
 
   private async init(): Promise<void> {
     if (this.state.isInitialized) return;
+
+    if (this.state.options.managedHost) {
+      setupAutocomplete(this.state);
+      buildLayout(this.state, () => this.refreshModelAuthStatus());
+      this.cleanupKeyHandlers = setupKeyHandlers(this.state, {
+        stop: () => this.stop(),
+        exit: exitCode => this.exit(exitCode),
+        doubleCtrlCMs: MastraTUI.DOUBLE_CTRL_C_MS,
+      });
+      this.state.ui.start();
+      subscribeToAgentController(this.state, event => this.handleEvent(event));
+      await syncInitialThreadState(this.state);
+      this.state.isInitialized = true;
+      await this.renderExistingMessagesAndSeedIdleCounter();
+      await renderExistingTasks(this.state);
+      this.state.options.managedHost.onReady?.();
+      return;
+    }
 
     // Initialize controller (but don't select thread yet)
     await this.state.controller.init();
@@ -1479,6 +1499,14 @@ export class MastraTUI {
   }
 
   private async handleSlashCommand(input: string): Promise<boolean> {
+    if (this.state.options.managedHost) {
+      try {
+        showInfo(this.state, await this.state.options.managedHost.dispatchSlashCommand(input));
+      } catch (error) {
+        showError(this.state, error instanceof Error ? error.message : 'Managed command failed');
+      }
+      return true;
+    }
     return dispatchSlashCommand(input, this.state, () => this.buildCommandContext());
   }
 

@@ -1,5 +1,8 @@
 import { generateTypes } from '@internal/types-builder';
 import { defineConfig } from 'tsdown';
+import { openOnlyBuildPlugin } from '../../../downstream/open-only-build-plugin.mjs';
+
+const openOnly = process.env.AEROMECH_OPEN_ONLY === '1';
 
 export default defineConfig({
   entry: [
@@ -7,8 +10,7 @@ export default defineConfig({
     'src/provider/index.ts',
     'src/types/index.ts',
     'src/session/index.ts',
-    'src/ee/index.ts',
-    'src/ee/capabilities.ts',
+    ...(!openOnly ? ['src/ee/index.ts', 'src/ee/capabilities.ts'] : []),
   ],
   format: ['esm', 'cjs'],
   fixedExtension: false,
@@ -16,7 +18,10 @@ export default defineConfig({
   clean: true,
   dts: false,
   treeshake: true,
-  sourcemap: true,
+  inputOptions: {
+    plugins: openOnly ? [openOnlyBuildPlugin()] : [],
+  },
+  sourcemap: !openOnly,
   onSuccess: async () => {
     await generateTypes(process.cwd(), new Set(['@internal/core']));
   },

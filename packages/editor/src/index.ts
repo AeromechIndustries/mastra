@@ -417,32 +417,9 @@ export class MastraEditor implements IMastraEditor {
     return this.__builderInstance;
   }
 
-  /**
-   * Defense-in-depth license guard for the Agent Builder. Mirrors the
-   * startup-time check in `MastraServer.validateAgentBuilderLicense()` so the
-   * builder cannot be instantiated outside the server boot path without a
-   * valid EE license. Dev environments bypass via `isEEEnabled()`.
-   */
+  /** Aeromech's maintained package does not include the optional builders. */
   private async assertBuilderLicensed(builderName: string): Promise<void> {
-    try {
-      const { isEEEnabled } = await import('@mastra/core/auth/ee');
-      if (!isEEEnabled()) {
-        throw new Error(
-          `[mastra/auth-ee] ${builderName} is configured but no valid EE license was found.\n` +
-            `${builderName} requires a Mastra Enterprise License for production use.\n` +
-            'Set the MASTRA_EE_LICENSE environment variable with your license key.\n' +
-            'Learn more: https://github.com/mastra-ai/mastra/blob/main/ee/LICENSE',
-        );
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('[mastra/auth-ee]')) {
-        throw err;
-      }
-      throw new Error(
-        `[mastra/auth-ee] ${builderName} is configured but the EE module (@mastra/core/auth/ee) could not be loaded.\n` +
-          'Ensure @mastra/core is updated to a version that includes EE support.',
-      );
-    }
+    throw new Error(`${builderName} is not included in the Aeromech open-only package.`);
   }
 
   /** Returns the editor's configured source, or undefined if unset. */

@@ -9,6 +9,22 @@ framework, agent, storage, workspace and Code patches here, with their upstream
 base, consuming application revision and focused verification recorded in the
 [downstream inventory](downstream/README.md).
 
+## Consumption contract
+
+- `AeromechIndustries/mastra` is the sole owner of Aeromech Mastra source
+  adaptations. TessarAct does not carry compiled Mastra patches.
+- `master` is the only accepted source line. All TessarAct editions and target
+  platforms consume the same accepted commit from `master`.
+- Consumers pin the full commit identifier. A branch name, tag that can move,
+  version range, or unqualified package version is not an accepted pin.
+- Issue branches exist only to reach `master`. Temporary branch consumption is
+  allowed for a linked integration issue, never for a release.
+- Upstream synchronization is maintained here through reviewed pull requests;
+  it is not performed independently in TessarAct.
+- Aeromech distributions contain only files whose redistribution terms have
+  been reviewed and accepted. The package-content gate must inspect the packed
+  artifact, not only the source tree.
+
 | Source | Role |
 | --- | --- |
 | `packages/core` | Durable execution, agent composition and remote workspace language services. |
@@ -74,18 +90,19 @@ repository bookkeeping.
 
 ## Source updates and builds
 
-The recorded application patch set pins `@mastra/core@1.74.0`,
+The historical application patch set pins `@mastra/core@1.74.0`,
 `@mastra/pg@1.29.0`, `@mastra/code-sdk@1.10.1` and `mastracode@0.44.1`.
 All four release tags resolve to upstream commit
 `b21e46e19b469a25c8896bcee90afd58d6f1a890`. The inventory preserves their exact
-compiled-package patches and Code image-build adaptations. TessarAct's existing
-package and image workflow remains the consumer until source ports and rebuilt
-packages pass their integration checks.
+compiled-package patches only as migration evidence. They are not a maintained
+delivery mechanism and must be removed after the corresponding source ports and
+consumer migration pass their integration checks.
 
-Record each new Mastra patch or amendment in the inventory. Keep exact package
-snapshots distinct from applied source commits and published packages. Mark
-source ports accepted only after the corresponding package checks pass. Track
-patches to other upstream projects with their own owner; TessarAct's
+Record each source adaptation and its upstream relationship in the inventory.
+Do not add new compiled Mastra patches. Keep historical snapshots distinct from
+applied source commits and published packages. Mark source ports accepted only
+after the corresponding package checks pass. Track patches to other upstream
+projects with their own owner; TessarAct's
 `@ai-sdk/provider-utils` patch belongs to Vercel AI SDK rather than this fork.
 
 For an integration update:
@@ -95,8 +112,10 @@ For an integration update:
    source-level commits.
 3. Build and check the affected packages using the upstream workspace tools.
 4. Record the package versions, source commit, checks and license notices.
-5. Update TessarAct's pinned dependencies through its dependency workflow.
-6. Verify the changed TessarAct journey. For sandbox components, build the
+5. Run `pnpm check:aeromech-release -- <packed-package-or-directory>...` and
+   retain its result with the source commit.
+6. Update TessarAct's exact fork commit through its dependency workflow.
+7. Verify the changed TessarAct journey. For sandbox components, build the
    workspace image through the infrastructure build contract before deployment
    acceptance.
 
@@ -111,6 +130,9 @@ Choose names describing the job, such as `workspace-sandbox`, `codeProcess` or
 modules and update the affected references together. Preserve exact upstream
 API identifiers where integrations depend on them.
 
-Retain upstream attribution and each component's license. The pinned Code
-packages identify Apache-2.0; the monorepo's [LICENSE.md](LICENSE.md) describes
-the separate license for `ee/` directories and third-party components.
+Retain upstream attribution and each component's license. Aeromech packages
+must not contain `ee/` files, enterprise-license text, source maps embedding
+those sources, or exports that resolve to them unless Aeromech has separately
+recorded written redistribution authority. The repository may retain upstream
+enterprise source for synchronization; the prohibition applies to Aeromech's
+packed and distributed artifacts.

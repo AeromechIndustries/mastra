@@ -150,14 +150,14 @@ async function validateDeclarationRuntimeImports(rootDir, bundledPackages) {
  *
  * @param {string} rootDir
  * @param {Set<string>} bundledPackages
- * @param {{ rollupTypes?: Record<string, string[]> }} options Declaration entry points relative to dist and their type-only dependencies.
+ * @param {{ rollupTypes?: Record<string, string[]>, noCheck?: boolean }} options Declaration entry points relative to dist and their type-only dependencies.
  * @returns {Promise<void>}
  */
-export async function generateTypes(rootDir, bundledPackages = new Set(), { rollupTypes = {} } = {}) {
+export async function generateTypes(rootDir, bundledPackages = new Set(), { rollupTypes = {}, noCheck = false } = {}) {
   try {
     // Use spawn instead of exec to properly inherit stdio
     // Use shell: true for cross-platform compatibility
-    const tscProcess = spawn('npx', ['tsc', '-p', 'tsconfig.build.json'], {
+    const tscProcess = spawn('npx', ['tsc', '-p', 'tsconfig.build.json', ...(noCheck ? ['--noCheck'] : [])], {
       cwd: rootDir,
       stdio: 'inherit',
       shell: true,

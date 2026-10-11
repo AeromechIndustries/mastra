@@ -1,8 +1,9 @@
-# TessarAct's Mastra patches
+# Aeromech Mastra adaptations
 
 Owner: aeromech-1. Executor: Codex.
 
-This directory records the maintained changes used by TessarAct across Mastra.
+This directory records the migration evidence and maintained changes used by
+TessarAct across Mastra.
 The [manifest](manifest.json) identifies exact package versions, source
 revisions and SHA-256 checksums. [MAINTENANCE.md](../MAINTENANCE.md) owns the
 update and publication workflow.
@@ -33,7 +34,8 @@ owner.
 
 ## Porting status
 
-`recorded` means the exact consumer patch or build recipe is preserved here.
+`recorded` means the exact historical consumer patch or build recipe is
+preserved here as migration evidence; it is not an accepted delivery path.
 The snapshots target compiled files in the pinned npm packages. Source-level
 ports onto their matching upstream base, rebuilt packages and application
 acceptance are separate steps. The fork's current upstream source has not had
@@ -61,5 +63,7 @@ node downstream/check-inventory.mjs --application /projects/TessarAct
 These checks verify provenance, patch syntax and inventory completeness. The
 affected package tests verify behavior when the source ports are implemented.
 
-Upstream licenses and attribution remain in the repository. Preserve the
-applicable package notices when producing downstream distributions.
+Upstream licenses and attribution remain in the repository. Before publishing,
+pack each affected package and run the release-boundary check described in
+[MAINTENANCE.md](../MAINTENANCE.md). Preserve all notices required by the files
+that remain in the artifact.

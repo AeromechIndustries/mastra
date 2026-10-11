@@ -457,7 +457,18 @@ export async function runIdleLoop<
     if (isProcessing || closed || runningTaskIds.size > 0 || pendingCompletions.length === 0) return;
     isProcessing = true;
     try {
-      const batch = pendingCompletions.splice(0, pendingCompletions.length);
+      const queued = pendingCompletions.splice(0, pendingCompletions.length);
+      const batch: Array<Record<string, unknown>> = [];
+      const isBackgroundTaskResultConsumed = restStreamOptions?.isBackgroundTaskResultConsumed as
+        | ((taskId: string) => boolean | Promise<boolean>)
+        | undefined;
+      for (const chunk of queued) {
+        const taskId = (chunk as { payload?: { taskId?: string } }).payload?.taskId;
+        if (!taskId || !isBackgroundTaskResultConsumed || !(await isBackgroundTaskResultConsumed(taskId))) {
+          batch.push(chunk);
+        }
+      }
+      if (batch.length === 0) return;
       for (const chunk of batch) {
         const tid = (chunk as { payload?: { taskId?: string } }).payload?.taskId;
         const ctype = (chunk as { type?: string }).type;
