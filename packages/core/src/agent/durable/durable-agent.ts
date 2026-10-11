@@ -4423,6 +4423,7 @@ export class DurableAgent<
       runId: options?.runId,
       requestContext: options?.requestContext,
       mastra: this.#mastra,
+      snapshotRequestContext: this.#snapshotRequestContext,
     });
 
     this.#runRegistry.registerWithMessageList(preparation.runId, preparation.registryEntry, preparation.messageList, {
