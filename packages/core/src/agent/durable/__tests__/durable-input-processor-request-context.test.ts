@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import type { Processor } from '../../../processors';
 import { RequestContext, MASTRA_AUTH_TOKEN_KEY, MASTRA_VERSIONS_KEY } from '../../../request-context';
 import { Agent } from '../../agent';
+import { createEventedAgent } from '../create-evented-agent';
 import { prepareForDurableExecution } from '../preparation';
 
 function createTextModel(text: string) {
@@ -40,6 +41,25 @@ function getRequestContextEntries(workflowInput: unknown): Record<string, unknow
 }
 
 describe('DurableAgent input processor requestContext writes (#23904)', () => {
+  it('forwards the application projection through prepare()', async () => {
+    const requestContext = new RequestContext();
+    requestContext.set('tenantId', 'tenant-1');
+    requestContext.set('secret', 'do-not-save');
+    const agent = createEventedAgent({
+      agent: new Agent({
+        id: 'prepare-projection-agent',
+        name: 'Prepare Projection Agent',
+        instructions: 'You are a helpful assistant.',
+        model: createTextModel('ok') as LanguageModelV2,
+      }),
+      snapshotRequestContext: context => ({ tenantId: context.get('tenantId') }),
+    });
+
+    const result = await agent.prepare('Hello', { requestContext });
+
+    expect(getRequestContextEntries(result.workflowInput)).toEqual({ tenantId: 'tenant-1' });
+  });
+
   it('uses an application projection and still strips framework credentials', async () => {
     const baseAgent = new Agent({
       id: 'projected-context-agent',
