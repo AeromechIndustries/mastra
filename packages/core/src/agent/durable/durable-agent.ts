@@ -38,7 +38,7 @@ import type { AgentAbortThreadOptions, AgentModelManagerConfig, ToolsInput } fro
 import { publishAbortRequest } from './abort-transport';
 import { AGENT_STREAM_TOPIC, DurableStepIds } from './constants';
 import { runDurableStreamUntilIdle, runResumeDurableStreamUntilIdle } from './durable-stream-until-idle';
-import { prepareForDurableExecution } from './preparation';
+import { extractCallTimeHeaders, prepareForDurableExecution, projectDurableRequestContext } from './preparation';
 import { endRunSpansWithError, ExtendedRunRegistry, globalRunRegistry } from './run-registry';
 import { createDurableAgentStream, emitChunkEvent, emitErrorEvent, emitFinishEvent } from './stream-adapter';
 import type { DurableAgentStreamResult as DurableStreamAdapterResult } from './stream-adapter';
@@ -1200,6 +1200,77 @@ export class DurableAgent<
     });
   }
 
+  async #resolveRehydratedExecution(
+    runId: string,
+    operation: 'recover' | 'resume',
+    requestContextEntries?: Record<string, unknown>,
+  ): Promise<(AgentExecutionOptions<TOutput> & { requestContext: RequestContext }) | undefined> {
+    if (!this.#rehydrateExecution) return undefined;
+
+    const options = await this.#rehydrateExecution({
+      runId,
+      agentId: this.id,
+      operation,
+      requestContextEntries,
+    });
+    if (!options?.requestContext) {
+      throw new Error('Durable execution rehydration requires a freshly authorized request context');
+    }
+
+    return {
+      ...options,
+      requestContext: projectDurableRequestContext(options.requestContext, this.#snapshotRequestContext),
+    };
+  }
+
+  async #rebuildExecutionBindings(
+    runId: string,
+    threadId: string | undefined,
+    resourceId: string | undefined,
+    options: AgentExecutionOptions<TOutput> & { requestContext: RequestContext },
+  ): Promise<Partial<RunRegistryEntry>> {
+    const wrapped = this.#wrappedAgent as Agent<string, any, TOutput>;
+    const requestContext = options.requestContext;
+    const model = await wrapped.getModel({ requestContext });
+    if (!model) throw new Error('Agent model not available during rehydration');
+
+    const backgroundTaskManager = this.#mastra?.backgroundTaskManager;
+    const tools = await wrapped.getToolsForExecution({
+      toolsets: options.toolsets,
+      clientTools: options.clientTools,
+      threadId,
+      resourceId,
+      runId,
+      requestContext,
+      memoryConfig: options.memory?.options,
+      autoResumeSuspendedTools: options.autoResumeSuspendedTools,
+      hooks: options.hooks,
+      delegation: options.delegation,
+      methodType: 'stream',
+      backgroundTaskEnabled: Boolean(backgroundTaskManager),
+      backgroundTaskPolicy: options.backgroundTaskPolicy,
+      model,
+    });
+    const authorizedTools = options.activeTools
+      ? Object.fromEntries(Object.entries(tools).filter(([name]) => options.activeTools?.includes(name)))
+      : tools;
+
+    return {
+      tools: authorizedTools,
+      baseTools: authorizedTools,
+      authorizedToolsOnly: true,
+      model,
+      requestContext,
+      workspace: await wrapped.getWorkspace({ requestContext }),
+      requireToolApproval: options.requireToolApproval,
+      stopWhen: options.stopWhen,
+      prepareStep: options.prepareStep,
+      isTaskComplete: options.isTaskComplete,
+      goal: wrapped.__getGoalConfig(),
+      callTimeHeaders: extractCallTimeHeaders(options.modelSettings),
+    };
+  }
+
   /** Rebuilds process-local recovery state from the persisted durable workflow input. */
   async #rehydrateRecoveryState({
     runId,
@@ -1214,17 +1285,11 @@ export class DurableAgent<
     recoveryLease: RecoveryLease;
     originalSpansEnded: boolean;
   }): Promise<RehydratedRecoveryState> {
-    const rehydratedOptions = this.#rehydrateExecution
-      ? await this.#rehydrateExecution({
-          runId,
-          agentId: this.id,
-          operation: 'recover',
-          requestContextEntries: workflowInput.requestContextEntries,
-        })
-      : undefined;
-    if (this.#rehydrateExecution && !rehydratedOptions?.requestContext) {
-      throw new Error('Durable execution rehydration requires a freshly authorized request context');
-    }
+    const rehydratedOptions = await this.#resolveRehydratedExecution(
+      runId,
+      'recover',
+      workflowInput.requestContextEntries,
+    );
     const requestContext: RequestContext = rehydratedOptions?.requestContext
       ? rehydratedOptions.requestContext
       : workflowInput.requestContextEntries
@@ -2617,6 +2682,39 @@ export class DurableAgent<
     resumeData: unknown,
     options?: DurableAgentResumeOptions<TOutput>,
   ): Promise<DurableAgentStreamResult<TOutput>> {
+    let rehydratedOptions: (AgentExecutionOptions<TOutput> & { requestContext: RequestContext }) | undefined;
+    if (this.#rehydrateExecution) {
+      const workflowsStore = await this.#mastra?.getStorage()?.getStore('workflows');
+      const persisted = await workflowsStore?.getWorkflowRunById({
+        runId,
+        workflowName: DurableStepIds.AGENTIC_LOOP,
+      });
+      if (!persisted) {
+        throw new Error(`No persisted workflow snapshot found for run ${runId}. Cannot resume.`);
+      }
+      const snapshot =
+        typeof persisted.snapshot === 'string'
+          ? (JSON.parse(persisted.snapshot) as WorkflowRunState)
+          : persisted.snapshot;
+      const workflowInput = snapshot?.context?.input as DurableAgenticWorkflowInput | undefined;
+      if (snapshot?.status !== 'suspended' || workflowInput?.__workflowKind !== 'durable-agent') {
+        throw new Error(`No suspended durable execution available for run ${runId}.`);
+      }
+      if (workflowInput.agentId !== this.id) {
+        throw new MastraError({
+          id: 'DURABLE_AGENT_RESUME_AGENT_MISMATCH',
+          domain: ErrorDomain.AGENT,
+          category: ErrorCategory.USER,
+          text: `DurableAgent "${this.name}" resume(${runId}): persisted run belongs to agent "${workflowInput.agentId}", not "${this.id}".`,
+          details: { agentName: this.name, runId, ownerAgentId: workflowInput.agentId },
+        });
+      }
+      rehydratedOptions = await this.#resolveRehydratedExecution(runId, 'resume', workflowInput.requestContextEntries);
+      // Reauthorization is authoritative. In particular, a stale caller context
+      // or toolset must not override the freshly authorized bindings.
+      options = { ...options, ...rehydratedOptions } as DurableAgentResumeOptions<TOutput>;
+    }
+
     let entry = this.#runRegistry.get(runId);
     if (!entry) {
       // A persisted durable run can outlive this process (or the registry TTL).
@@ -2703,17 +2801,6 @@ export class DurableAgent<
       )?.memoryInfo;
       const threadId = workflowInput.state?.threadId ?? messageListMemoryInfo?.threadId;
       const resourceId = workflowInput.state?.resourceId ?? messageListMemoryInfo?.resourceId;
-      const rehydratedOptions = this.#rehydrateExecution
-        ? await this.#rehydrateExecution({
-            runId,
-            agentId: this.id,
-            operation: 'resume',
-            requestContextEntries: workflowInput.requestContextEntries,
-          })
-        : undefined;
-      if (this.#rehydrateExecution && !rehydratedOptions?.requestContext) {
-        throw new Error('Durable execution rehydration requires a freshly authorized request context');
-      }
       const snapshotRequestContext = workflowInput.requestContextEntries
         ? new RequestContext<unknown>(Object.entries(workflowInput.requestContextEntries))
         : undefined;
@@ -2759,8 +2846,10 @@ export class DurableAgent<
       // Keep the caller's instance so schema-transformed contexts retain their
       // input source. Caller values win except for framework-managed memory.
       resumeRequestContext = options.requestContext;
-      for (const [key, value] of entry.requestContext?.entries() ?? []) {
-        if (!resumeRequestContext.has(key)) resumeRequestContext.set(key, value);
+      if (!rehydratedOptions) {
+        for (const [key, value] of entry.requestContext?.entries() ?? []) {
+          if (!resumeRequestContext.has(key)) resumeRequestContext.set(key, value);
+        }
       }
       if (entry.requestContext?.has('MastraMemory')) {
         resumeRequestContext.set('MastraMemory', entry.requestContext.get('MastraMemory'));
@@ -2773,6 +2862,14 @@ export class DurableAgent<
     const globalEntryForContext = globalRunRegistry.get(runId);
     if (globalEntryForContext) {
       globalEntryForContext.requestContext = resumeRequestContext;
+    }
+    if (rehydratedOptions) {
+      const bindings = await this.#rebuildExecutionBindings(runId, memoryInfo?.threadId, memoryInfo?.resourceId, {
+        ...rehydratedOptions,
+        requestContext: resumeRequestContext ?? rehydratedOptions.requestContext,
+      });
+      Object.assign(entry, bindings);
+      if (globalEntryForContext) Object.assign(globalEntryForContext, bindings);
     }
 
     const resolvedOptions = (await this.#resolveExecutionOptions({

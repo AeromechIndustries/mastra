@@ -83,6 +83,11 @@ describe('DurableAgent input processor requestContext writes (#23904)', () => {
     });
 
     expect(getRequestContextEntries(result.workflowInput)).toEqual({ tenantId: 'tenant-1' });
+    expect(result.registryEntry.requestContext?.get('secret')).toBe('do-not-save');
+    expect(result.registryEntry.requestContext?.get(MASTRA_AUTH_TOKEN_KEY)).toBe('do-not-save');
+    expect(result.registryEntry.requestContext?.toJSON()).toEqual({ tenantId: 'tenant-1' });
+    expect(result.registryEntry.requestContext?.serializeForSpan()).toEqual({ tenantId: 'tenant-1' });
+    expect(JSON.stringify(result.registryEntry.requestContext)).not.toContain('do-not-save');
   });
 
   it('persists input processor requestContext writes into the workflow input', async () => {
