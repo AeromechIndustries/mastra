@@ -6,6 +6,7 @@ import { getRequestAccountSelection, isRequestAccountRoutingExhausted } from '..
 import { ProviderAuthRequiredError } from '../auth/provider-auth-error.js';
 import type { CredentialStore, OAuthAccountRecord } from '../auth/types.js';
 import { MODEL_ROUTE_MAX_ENTRIES } from '../constants.js';
+import { getManagedCodeHost } from '../managed-host.js';
 import {
   loadSettings,
   resolveDefaultThinkingLevel,
@@ -162,6 +163,8 @@ export function resolveModel(
     anthropicPromptCacheScope?: AnthropicPromptCacheScope;
   },
 ): GatewayLanguageModel {
+  const managedHost = getManagedCodeHost();
+  if (managedHost) return managedHost.resolveModel(modelId, options);
   reloadAuthStorage();
   const headers = getAgentControllerHeaders(options?.requestContext);
   const settings = loadSettings();
@@ -334,6 +337,7 @@ export function getDynamicModel(
   const thinkingLevel = resolveRequestThinkingLevel(controller, settingsPath);
   const resolveOptions = { thinkingLevel, remapForCodexOAuth: true, requestContext } as const;
   const primary = resolveModel(modelId, resolveOptions);
+  if (getManagedCodeHost()) return primary;
   const route = state?.modelRoute?.entries?.slice(0, MODEL_ROUTE_MAX_ENTRIES);
   const pendingEntryId =
     pendingFallback && typeof pendingFallback.toEntryId === 'string' ? pendingFallback.toEntryId : undefined;

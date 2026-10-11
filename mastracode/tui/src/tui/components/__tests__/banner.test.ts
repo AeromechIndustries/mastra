@@ -55,6 +55,19 @@ describe('renderHeader', () => {
     const lines = plain(renderHeader(100, { version: '1.0.0', appName: 'My Custom App', info: INFO }));
     expect(lines).toEqual(['◆ My Custom App v1.0.0']);
   });
+
+  it('renders host-owned art and attribution for an embedded surface', () => {
+    const lines = plain(
+      renderHeader(100, {
+        version: '1.0.0',
+        appName: 'TessarAct Code',
+        info: INFO,
+        branding: { art: ['TESSARACT', 'CODE'], attribution: 'Aeromech Industries' },
+      }),
+    );
+    expect(lines.slice(0, 4)).toEqual(['TESSARACT', 'CODE', 'Aeromech Industries', 'TessarAct Code v1.0.0']);
+    expect(lines).toContain('Project: mastra');
+  });
 });
 
 describe('logo', () => {

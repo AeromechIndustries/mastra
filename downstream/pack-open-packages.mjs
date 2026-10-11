@@ -28,6 +28,7 @@ const packages = [
   { directory: 'packages/core', slug: 'mastra-core', core: true },
   { directory: 'packages/editor', slug: 'mastra-editor', editor: true },
   { directory: 'stores/pg', slug: 'mastra-pg' },
+  { directory: 'packages/fastembed', slug: 'mastra-fastembed', extraFiles: ['LICENSE-fastembed'] },
   { directory: 'mastracode/sdk', slug: 'mastra-code-sdk' },
   { directory: 'mastracode/tui', slug: 'mastracode' },
 ];
@@ -43,10 +44,11 @@ for (const descriptor of packages) {
   mkdirSync(stage, { recursive: true });
   cpSync(path.join(source, 'dist'), path.join(stage, 'dist'), { recursive: true });
   cpSync(path.join(root, 'downstream', 'APACHE-LICENSE.md'), path.join(stage, 'LICENSE.md'));
+  for (const file of descriptor.extraFiles ?? []) cpSync(path.join(source, file), path.join(stage, file));
 
   const manifest = JSON.parse(readFileSync(path.join(source, 'package.json'), 'utf8'));
   manifest.private = false;
-  manifest.files = ['dist', 'LICENSE.md', 'NOTICE', 'AEROMECH_SOURCE.json'];
+  manifest.files = ['dist', 'LICENSE.md', 'NOTICE', 'AEROMECH_SOURCE.json', ...(descriptor.extraFiles ?? [])];
   manifest.scripts = {};
   manifest.aeromechSource = { repository, revision, line: 'master', openOnly: true };
   delete manifest.devDependencies;

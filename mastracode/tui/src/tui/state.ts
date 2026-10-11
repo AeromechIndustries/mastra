@@ -192,8 +192,12 @@ export interface MastraTUIOptions {
   managedHost?: {
     projectInfo: ProjectInfo;
     autocompleteProvider?: CombinedAutocompleteProvider;
-    dispatchSlashCommand(input: string): Promise<string>;
+    /** Return undefined to let the native command handler continue. */
+    dispatchSlashCommand(input: string): Promise<string | undefined>;
     submitShell(command: string): Promise<string>;
+    startupNotice?: string;
+    providerManagementMessage?: string;
+    header?: { art?: string[]; attribution?: string };
     onReady?(): void;
     readPlanFile?(path: string): Promise<{ title: string; plan: string } | undefined>;
   };

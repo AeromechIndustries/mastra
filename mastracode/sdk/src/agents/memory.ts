@@ -12,6 +12,7 @@ import {
   MODEL_ROUTE_MAX_ENTRIES,
 } from '../constants.js';
 import { LOCAL_KNOWLEDGE_ORG_ID, resolveKnowledgeScopeIdentity } from '../knowledge-scope.js';
+import { getManagedCodeHost } from '../managed-host.js';
 import { loadSettings } from '../onboarding/settings.js';
 import { ANTHROPIC_PROMPT_CACHE_TTL } from '../providers/anthropic-prompt-cache.js';
 import type { MastraCodeState } from '../schema.js';
@@ -37,6 +38,11 @@ function resolveOmRoleModelForRequest(
     const roleOverride =
       role === 'observer' ? settings.models?.observerModelOverride : settings.models?.reflectorModelOverride;
     if (roleOverride) return resolveModel(roleOverride, resolveOptions);
+  }
+
+  if (getManagedCodeHost()) {
+    const managedModelId = role === 'observer' ? state?.observerModelId : state?.reflectorModelId;
+    return resolveModel(managedModelId ?? DEFAULT_OM_MODEL_ID, resolveOptions);
   }
 
   const pending = state?.mastracodePendingModelFallback;

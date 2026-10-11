@@ -10,36 +10,34 @@ update and publication workflow.
 
 ## Recorded changes
 
-| Package | Changes | Current consumer |
+| Package | Historical change | Maintained source owner |
 | --- | --- | --- |
-| `@mastra/core@1.74.0` | Durable request-context projection and authorized recovery, execution checkpoints, preserved workspace/memory bindings, agent-factory composition, and remote filesystem/LSP queries. | TessarAct's package patch. |
-| `@mastra/pg@1.29.0` | JSON serialization and background-task argument, result and suspension-payload handling. | TessarAct's package patch. |
-| `@mastra/code-sdk@1.10.1` | Managed host instructions and tool/mode guidance. | TessarAct's package patch. |
-| `mastracode@0.44.1` | Terminal injection and managed session, command, shell, plan and display seams. | TessarAct's retained managed-renderer integration. |
-| [Code image recipe](adaptations/code-image.mjs) | Server-authorized model calls, persistent state location, credential boundaries, redraw, Files navigation and branding. | The native Code implementation branch; image acceptance remains pending under [#534](https://github.com/AeromechIndustries/TessarAct/issues/534). |
+| `@mastra/core@1.74.0` | Durable request-context projection and authorized recovery, execution checkpoints, preserved workspace/memory bindings, agent-factory composition, and remote filesystem/LSP queries. | `packages/core` on this fork's `master`. |
+| `@mastra/pg@1.29.0` | JSON serialization and background-task argument, result and suspension-payload handling. | Current `stores/pg` behavior supersedes the recorded compiled patch. |
+| `@mastra/code-sdk@1.10.1` | Managed host instructions, model selection, state paths, thinking defaults and retry ownership. | `mastracode/sdk` on this fork's `master`. |
+| `mastracode@0.44.1` | Terminal injection and managed session, command, shell, plan, redraw and display seams. | `mastracode/tui` on this fork's `master`. |
+| [Code image recipe](adaptations/code-image.mjs) | Server-authorized model calls, persistent state location, credential boundaries, redraw, Files navigation and branding. | Historical integration evidence; TessarAct consumes the maintained source APIs under [#623](https://github.com/AeromechIndustries/TessarAct/issues/623). |
 
 The four package snapshots were exported byte-for-byte from TessarAct revision
 `aff10b6bb93080d40d8bb4b5fb3fe3ee5c9866b1`. Their upstream release tags all resolve
 to `b21e46e19b469a25c8896bcee90afd58d6f1a890`.
 
-The Code recipe is an exact snapshot from revision
+The Code recipe is an exact historical snapshot from revision
 `e5f71086cc44463383d956c36e4b31427e0f3a4f`. It depends on TessarAct entrypoints and
-its staged package layout; run the application-owned build workflow for it.
+its former staged package layout and must not be applied to current packages.
 The checked prompt and thinking seams feed published mode guidance and intensity
 efforts into native Code controls while retaining conversation overrides. This
 configuration slice is tracked in [TessarAct #610](https://github.com/AeromechIndustries/TessarAct/issues/610).
-The package patch retains older managed-renderer hooks. Porting reviews which
-hooks the native Code path still needs rather than activating a second agent
-owner.
+The current source API retains only the managed seams the native Code path uses.
 
 ## Porting status
 
 `recorded` means the exact historical consumer patch or build recipe is
 preserved here as migration evidence; it is not an accepted delivery path.
-The snapshots target compiled files in the pinned npm packages. Source-level
-ports onto their matching upstream base, rebuilt packages and application
-acceptance are separate steps. The fork's current upstream source has not had
-these snapshots applied to it. Application dependency pins remain unchanged.
+The snapshots target compiled files in the former pinned npm packages. Their
+maintained equivalents are source-owned in this fork and published only through
+the open-package workflow. TessarAct migration and acceptance are tracked in
+its issue #623; the snapshots must never be reapplied there.
 
 The separate `@ai-sdk/provider-utils@3.0.28` patch is listed under
 `externalPatches` for complete accounting of the application patch list. Its

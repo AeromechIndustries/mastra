@@ -39,6 +39,7 @@ export function renderLogo(rows: string[] = LOGO_HEADER): string[] {
 export interface HeaderOptions {
   version: string;
   appName?: string;
+  branding?: { art?: string[]; attribution?: string };
   /** Muted info lines (Project, Resource ID, Branch, Worktree of). */
   info: string[];
 }
@@ -51,10 +52,15 @@ const LOGO_GAP = 3;
  * - narrow: logo stacked above title + info
  * - very narrow or a custom app name: one text line
  */
-export function renderHeader(width: number, { version, appName, info }: HeaderOptions): string[] {
+export function renderHeader(width: number, { version, appName, info, branding }: HeaderOptions): string[] {
   const name = appName || 'Mastra Code';
   const compact =
     theme.fg('accent', '◆') + ' ' + theme.bold(theme.fg('accent', name)) + theme.fg('dim', ` v${version}`);
+  if (branding?.art?.length && width >= 30) {
+    const art = branding.art.map(line => theme.fg('accent', line));
+    const attribution = branding.attribution ? [theme.fg('dim', branding.attribution)] : [];
+    return [...art, ...attribution, theme.bold(theme.fg('text', name)) + theme.fg('dim', ` v${version}`), ...info];
+  }
   if (name !== 'Mastra Code' || width < 30) return [compact];
 
   const title = theme.bold(theme.fg('text', name)) + theme.fg('dim', ` v${version}`);

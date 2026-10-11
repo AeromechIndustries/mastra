@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULT_CONFIG_DIR } from '../constants.js';
+import { getManagedCodeHost } from '../managed-host.js';
 export interface ProjectInfo {
   /** Unique resource ID for this project (used for thread grouping) */
   resourceId: string;
@@ -185,6 +186,11 @@ export function getCurrentGitBranchAsync(cwd: string): Promise<string | undefine
  * - Windows: %APPDATA%/mastracode
  */
 export function getAppDataDir(): string {
+  const managedDirectory = getManagedCodeHost()?.appDataDir;
+  if (managedDirectory) {
+    fs.mkdirSync(managedDirectory, { recursive: true });
+    return managedDirectory;
+  }
   if (process.env.MASTRA_APP_DATA_DIR) {
     fs.mkdirSync(process.env.MASTRA_APP_DATA_DIR, { recursive: true });
     return process.env.MASTRA_APP_DATA_DIR;
